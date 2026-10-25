@@ -1,10 +1,226 @@
-'use client';
-import {useState,useEffect} from 'react';import {api} from './client';import {calendarDays,dateKey,shiftDate,wallTime,wallTimeToUtc} from '../../../packages/contracts/src/calendar';import {ErrorBanner,StatusChip} from '../../../packages/ui/src/index';
-export default function CalendarView({organization}:{organization:string}) {
-  const [anchor,setAnchor]=useState(dateKey(new Date())),[view,setView]=useState<'month'|'week'>('month'),[events,setEvents]=useState<any[]>([]),[error,setError]=useState(''),[selected,setSelected]=useState<any>(),[wall,setWall]=useState(''),[ambiguity,setAmbiguity]=useState<'reject'|'earlier'|'later'>('reject'),[refresh,setRefresh]=useState(0);
-  const days=calendarDays(anchor,view),from=days[0],until=shiftDate(days.at(-1)!,1);
-  useEffect(()=>{let valid=true;setEvents([]);api(`/calendar?from=${from}T00:00:00Z&to=${until}T00:00:00Z`,organization).then(r=>{if(valid)setEvents(r.data);}).catch(e=>{if(valid)setError(e.message);});return()=>{valid=false;};},[organization,from,until,refresh]);
-  function move(direction:number){if(view==='week')setAnchor(shiftDate(anchor,7*direction));else{const d=new Date(`${anchor.slice(0,7)}-01T12:00:00Z`);d.setUTCMonth(d.getUTCMonth()+direction);setAnchor(dateKey(d));}}
-  async function save(event:any,value:string){await api(`/publications/${event.publication_job_id}/reschedule`,organization,'POST',{scheduled_at:wallTimeToUtc(value,event.timezone,ambiguity),row_version:event.row_version});setSelected(undefined);setRefresh(v=>v+1);setError('');}
-  return <section className="panel"><div className="toolbar"><button className="secondary" onClick={()=>move(-1)} aria-label="Período anterior">←</button><input aria-label="Data do calendário" type="date" value={anchor} onChange={e=>e.target.value&&setAnchor(e.target.value)}/><button className="secondary" onClick={()=>move(1)} aria-label="Próximo período">→</button><select aria-label="Visualização" value={view} onChange={e=>setView(e.target.value as any)}><option value="month">Mês</option><option value="week">Semana</option></select><button className="secondary" onClick={()=>setAnchor(dateKey(new Date()))}>Hoje</button></div>{error&&<ErrorBanner error={error}/>}<p className="muted">Horários apresentados no fuso da identidade. Arraste um agendamento pendente para mudar o dia.</p><div className={`calendar ${view}`}>{days.map(day=><article key={day} onDragOver={e=>e.preventDefault()} onDrop={async e=>{e.preventDefault();const event=events.find(item=>item.publication_job_id===e.dataTransfer.getData('text/plain'));if(event)try{await save(event,`${day}T${wallTime(event.planned_at,event.timezone).slice(11)}`);}catch(error){setError((error as Error).message);}}}><span>{new Date(`${day}T12:00:00Z`).toLocaleDateString('pt-BR',{weekday:'short',day:'2-digit',month:'2-digit',timeZone:'UTC'})}</span>{events.filter(event=>wallTime(event.planned_at,event.timezone).slice(0,10)===day).map(event=><button key={event.id} className="calendar-event" draggable={['queued','retry'].includes(event.job_status)} onDragStart={e=>e.dataTransfer.setData('text/plain',event.publication_job_id)} onClick={()=>{setSelected(event);setWall(wallTime(event.planned_at,event.timezone));}}><strong>{event.title}</strong><StatusChip status={event.job_status}/><small>{wallTime(event.planned_at,event.timezone).slice(11)} · {event.timezone}<br/>{event.handle}</small></button>)}</article>)}</div>{selected&&<form className="panel" onSubmit={async e=>{e.preventDefault();try{await save(selected,wall);}catch(error){setError((error as Error).message);}}}><h2>Reagendar: {selected.title}</h2><p>{selected.timezone}</p><label>Data e hora neste fuso<input required type="datetime-local" value={wall} onChange={e=>setWall(e.target.value)}/></label><label>Se o horário ocorrer duas vezes<select value={ambiguity} onChange={e=>setAmbiguity(e.target.value as any)}><option value="reject">Pedir uma escolha</option><option value="earlier">Primeira ocorrência</option><option value="later">Segunda ocorrência</option></select></label><button disabled={!['queued','retry'].includes(selected.job_status)}>Confirmar reagendamento</button><button className="secondary" type="button" onClick={()=>setSelected(undefined)}>Voltar</button></form>}</section>;
+"use client";
+import { useState, useEffect } from "react";
+import { api } from "./client";
+import {
+  calendarDays,
+  dateKey,
+  shiftDate,
+  wallTime,
+  wallTimeToUtc,
+} from "../../../packages/contracts/src/calendar";
+import { ErrorBanner, StatusChip } from "../../../packages/ui/src/index";
+export default function CalendarView({
+  organization,
+}: {
+  organization: string;
+}) {
+  const [anchor, setAnchor] = useState(dateKey(new Date())),
+    [view, setView] = useState<"month" | "week">("month"),
+    [events, setEvents] = useState<any[]>([]),
+    [error, setError] = useState(""),
+    [selected, setSelected] = useState<any>(),
+    [wall, setWall] = useState(""),
+    [ambiguity, setAmbiguity] = useState<"reject" | "earlier" | "later">(
+      "reject",
+    ),
+    [refresh, setRefresh] = useState(0);
+  const days = calendarDays(anchor, view),
+    from = shiftDate(days[0], -1),
+    until = shiftDate(days.at(-1)!, 2);
+  useEffect(() => {
+    let valid = true;
+    setEvents([]);
+    api(
+      `/calendar-range?from=${from}T00:00:00Z&to=${until}T00:00:00Z`,
+      organization,
+    )
+      .then((r) => {
+        if (valid) setEvents(r.data);
+      })
+      .catch((e) => {
+        if (valid) setError(e.message);
+      });
+    return () => {
+      valid = false;
+    };
+  }, [organization, from, until, refresh]);
+  function move(direction: number) {
+    if (view === "week") setAnchor(shiftDate(anchor, 7 * direction));
+    else {
+      const d = new Date(`${anchor.slice(0, 7)}-01T12:00:00Z`);
+      d.setUTCMonth(d.getUTCMonth() + direction);
+      setAnchor(dateKey(d));
+    }
+  }
+  async function save(event: any, value: string) {
+    await api(
+      `/publications/${event.publication_job_id}/reschedule`,
+      organization,
+      "POST",
+      {
+        scheduled_at: wallTimeToUtc(value, event.timezone, ambiguity),
+        row_version: event.row_version,
+      },
+    );
+    setSelected(undefined);
+    setRefresh((v) => v + 1);
+    setError("");
+  }
+  return (
+    <section className="panel">
+      <div className="toolbar">
+        <button
+          className="secondary"
+          onClick={() => move(-1)}
+          aria-label="Período anterior"
+        >
+          ←
+        </button>
+        <input
+          aria-label="Data do calendário"
+          type="date"
+          value={anchor}
+          onChange={(e) => e.target.value && setAnchor(e.target.value)}
+        />
+        <button
+          className="secondary"
+          onClick={() => move(1)}
+          aria-label="Próximo período"
+        >
+          →
+        </button>
+        <select
+          aria-label="Visualização"
+          value={view}
+          onChange={(e) => setView(e.target.value as any)}
+        >
+          <option value="month">Mês</option>
+          <option value="week">Semana</option>
+        </select>
+        <button
+          className="secondary"
+          onClick={() => setAnchor(dateKey(new Date()))}
+        >
+          Hoje
+        </button>
+      </div>
+      {error && <ErrorBanner error={error} />}
+      <p className="muted">
+        Horários apresentados no fuso da identidade. Arraste um agendamento
+        pendente para mudar o dia.
+      </p>
+      <div className={`calendar ${view}`}>
+        {days.map((day) => (
+          <article
+            key={day}
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={async (e) => {
+              e.preventDefault();
+              const event = events.find(
+                (item) =>
+                  item.publication_job_id ===
+                  e.dataTransfer.getData("text/plain"),
+              );
+              if (event)
+                try {
+                  await save(
+                    event,
+                    `${day}T${wallTime(event.planned_at, event.timezone).slice(11)}`,
+                  );
+                } catch (error) {
+                  setError((error as Error).message);
+                }
+            }}
+          >
+            <span>
+              {new Date(`${day}T12:00:00Z`).toLocaleDateString("pt-BR", {
+                weekday: "short",
+                day: "2-digit",
+                month: "2-digit",
+                timeZone: "UTC",
+              })}
+            </span>
+            {events
+              .filter(
+                (event) =>
+                  wallTime(event.planned_at, event.timezone).slice(0, 10) ===
+                  day,
+              )
+              .map((event) => (
+                <button
+                  key={event.id}
+                  className="calendar-event"
+                  draggable={["queued", "retry"].includes(event.job_status)}
+                  onDragStart={(e) =>
+                    e.dataTransfer.setData(
+                      "text/plain",
+                      event.publication_job_id,
+                    )
+                  }
+                  onClick={() => {
+                    setSelected(event);
+                    setWall(wallTime(event.planned_at, event.timezone));
+                  }}
+                >
+                  <strong>{event.title}</strong>
+                  <StatusChip status={event.job_status} />
+                  <small>
+                    {wallTime(event.planned_at, event.timezone).slice(11)} ·{" "}
+                    {event.timezone}
+                    <br />
+                    {event.handle}
+                  </small>
+                </button>
+              ))}
+          </article>
+        ))}
+      </div>
+      {selected && (
+        <form
+          className="panel"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            try {
+              await save(selected, wall);
+            } catch (error) {
+              setError((error as Error).message);
+            }
+          }}
+        >
+          <h2>Reagendar: {selected.title}</h2>
+          <p>{selected.timezone}</p>
+          <label>
+            Data e hora neste fuso
+            <input
+              required
+              type="datetime-local"
+              value={wall}
+              onChange={(e) => setWall(e.target.value)}
+            />
+          </label>
+          <label>
+            Se o horário ocorrer duas vezes
+            <select
+              value={ambiguity}
+              onChange={(e) => setAmbiguity(e.target.value as any)}
+            >
+              <option value="reject">Pedir uma escolha</option>
+              <option value="earlier">Primeira ocorrência</option>
+              <option value="later">Segunda ocorrência</option>
+            </select>
+          </label>
+          <button disabled={!["queued", "retry"].includes(selected.job_status)}>
+            Confirmar reagendamento
+          </button>
+          <button
+            className="secondary"
+            type="button"
+            onClick={() => setSelected(undefined)}
+          >
+            Voltar
+          </button>
+        </form>
+      )}
+    </section>
+  );
 }

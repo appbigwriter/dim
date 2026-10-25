@@ -94,7 +94,7 @@ export async function activationBlockers(db: DB, actor: Actor, identity: any) {
   if (
     !(await one(
       db,
-      "SELECT 1 FROM custom_dim.influencer_assignments WHERE organization_id=$1 AND influencer_id=$2 AND responsibility='editor' AND (ends_at IS NULL OR ends_at>now())",
+      "SELECT 1 FROM custom_dim.influencer_assignments a JOIN custom_dim.organization_members m ON m.organization_id=a.organization_id AND m.user_id=a.user_id AND m.status='active' WHERE a.organization_id=$1 AND a.influencer_id=$2 AND a.responsibility='editor' AND (a.ends_at IS NULL OR a.ends_at>now())",
       values,
     ))
   )
@@ -126,11 +126,35 @@ export async function activationBlockers(db: DB, actor: Actor, identity: any) {
   if (
     !(await one(
       db,
-      `SELECT 1 FROM custom_dim.onboarding_approvals a JOIN custom_dim.onboarding_sessions s ON s.id=a.session_id WHERE s.organization_id=$1 AND s.influencer_id=$2 AND a.decision='approved'`,
+      `SELECT 1 FROM (SELECT a.decision FROM custom_dim.onboarding_approvals a JOIN custom_dim.onboarding_sessions s ON s.id=a.session_id WHERE s.organization_id=$1 AND s.influencer_id=$2 ORDER BY a.decided_at DESC NULLS LAST,a.created_at DESC LIMIT 1) latest WHERE decision='approved'`,
       values,
     ))
   )
     blockers.push("onboarding_approval");
+  if (
+    await one(
+      db,
+      "SELECT 1 FROM custom_dim.onboarding_tasks t JOIN custom_dim.onboarding_sessions s ON s.id=t.session_id WHERE s.organization_id=$1 AND s.influencer_id=$2 AND t.status<>'completed'",
+      values,
+    )
+  )
+    blockers.push("pending_onboarding_tasks");
+  if (
+    await one(
+      db,
+      "SELECT 1 FROM custom_dim.account_provisioning_tasks t JOIN custom_dim.social_accounts a ON a.id=t.social_account_id WHERE a.organization_id=$1 AND a.influencer_id=$2 AND t.status<>'completed'",
+      values,
+    )
+  )
+    blockers.push("pending_account_tasks");
+  if (
+    await one(
+      db,
+      "SELECT 1 FROM custom_dim.onboarding_steps t JOIN custom_dim.onboarding_sessions s ON s.id=t.session_id WHERE s.organization_id=$1 AND s.influencer_id=$2 AND t.step_code<>'activation' AND t.status<>'completed'",
+      values,
+    )
+  )
+    blockers.push("onboarding_steps_incomplete");
   return blockers;
 }
 export async function transition(
@@ -304,19 +328,19 @@ export async function saveOnboarding(
         "activation",
       ]),
       data: json,
-      status: z.enum(["pending", "in_progress", "completed"]),
+      status: z.enum(["pending", "in_progress"]),
     })
     .strict()
     .parse(input);
   const session = await resource(db, "onboarding_sessions", id, actor);
   authorize(actor, "identity.write", { influencerId: session.influencer_id });
   await db.query(
-    "UPDATE custom_dim.onboarding_steps SET data=$1,status=$2,completed_by=$3,completed_at=$4 WHERE session_id=$5 AND step_code=$6",
+    "UPDATE custom_dim.onboarding_steps SET data=$1,status=CASE WHEN data=$1::jsonb AND status='completed' THEN status ELSE $2 END,completed_by=CASE WHEN data=$1::jsonb AND status='completed' THEN completed_by ELSE $3 END,completed_at=CASE WHEN data=$1::jsonb AND status='completed' THEN completed_at ELSE $4 END WHERE session_id=$5 AND step_code=$6",
     [
       JSON.stringify(data.data),
       data.status,
       actor.userId,
-      data.status === "completed" ? new Date().toISOString() : null,
+      null,
       id,
       data.step_code,
     ],

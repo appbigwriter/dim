@@ -1,3 +1,6 @@
+import { collectMetrics } from "../packages/core/src/monitoring";
+import { analytics } from "../packages/core/src/queries";
+import { reschedule } from "../packages/core/src/completion";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -159,6 +162,10 @@ export async function operational(
     reviewer_id: reviewActor.userId,
     decision: "approved",
   });
+  await db.query(
+    "UPDATE custom_dim.onboarding_steps SET status='completed' WHERE session_id=$1 AND step_code<>'activation'",
+    [session.id],
+  );
   for (const status of [
     "under_review",
     "approved",
@@ -311,7 +318,7 @@ test("approved exact hash -> idempotent publication -> external ID, no duplicate
     const connector: Connector = {
       publish: async () => {
         calls++;
-        return { externalId: "official-test-123" };
+        return { externalId: "1234567890" };
       },
       health: async () => ({
         publish: true,
@@ -319,6 +326,42 @@ test("approved exact hash -> idempotent publication -> external ID, no duplicate
         sendMessages: true,
       }),
     };
+    const future = new Date(Date.now() + 3600000).toISOString();
+    const moved = await scoped(f.db, f.editActor, (tx) =>
+      reschedule(tx, f.editActor, job.id, {
+        scheduled_at: future,
+        row_version: job.row_version,
+      }),
+    );
+    assert.equal(moved.row_version, 2);
+    await assert.rejects(
+      () =>
+        scoped(f.db, f.editActor, (tx) =>
+          reschedule(tx, f.editActor, job.id, {
+            scheduled_at: future,
+            row_version: job.row_version,
+          }),
+        ),
+      /alterado/,
+    );
+    assert.equal(
+      new Date(
+        (
+          await one(
+            f.db,
+            "SELECT planned_at FROM custom_dim.editorial_calendar_items WHERE publication_job_id=$1",
+            [job.id],
+          )
+        ).planned_at,
+      ).toISOString(),
+      future,
+    );
+    await executePublication(f.db, job.id, connector, vault);
+    assert.equal(calls, 0);
+    await f.db.query(
+      "UPDATE custom_dim.publication_jobs SET scheduled_at=now()-interval '1 second' WHERE id=$1",
+      [job.id],
+    );
     await executePublication(f.db, job.id, connector, vault);
     await executePublication(f.db, job.id, connector, vault);
     assert.equal(calls, 1);
@@ -330,7 +373,73 @@ test("approved exact hash -> idempotent publication -> external ID, no duplicate
           [job.id],
         )
       ).external_post_id,
-      "official-test-123",
+      "1234567890",
+    );
+    const xPlatform = await one(
+      f.db,
+      "SELECT id FROM custom_dim.platforms WHERE code='x'",
+    );
+    await f.db.query(
+      "UPDATE custom_dim.social_accounts SET platform_id=$1,external_id=$2 WHERE id=$3",
+      [xPlatform.id, "456", account.id],
+    );
+    await f.db.query(
+      "UPDATE custom_dim.account_integrations SET secret_ref=$1 WHERE social_account_id=$2",
+      [`dim/${f.org.id}/${account.id}/token`, account.id],
+    );
+    await collectMetrics(f.db, vault, (async () =>
+      Response.json({
+        data: {
+          id: "1234567890",
+          author_id: "456",
+          public_metrics: { like_count: 12, impression_count: 100 },
+        },
+      })) as typeof fetch);
+    const metrics = await analytics(f.db, f.actor, {
+      from: new Date(Date.now() - 86400000).toISOString(),
+      to: new Date(Date.now() + 1000).toISOString(),
+    });
+    assert.equal(
+      metrics.metrics.find((m) => m.metric_code === "like_count").delta,
+      "12",
+    );
+    const published = await one(
+      f.db,
+      "SELECT * FROM custom_dim.published_posts WHERE job_id=$1",
+      [job.id],
+    );
+    await f.db.query(
+      "UPDATE custom_dim.published_posts SET metrics_attempted_at=NULL WHERE id=$1",
+      [published.id],
+    );
+    await collectMetrics(
+      f.db,
+      vault,
+      (async () =>
+        new Response("Unavailable", { status: 503 })) as typeof fetch,
+    );
+    assert.equal(
+      (
+        await f.db.query(
+          "SELECT * FROM custom_dim.publication_metrics WHERE published_post_id=$1",
+          [published.id],
+        )
+      ).rows.length,
+      2,
+    );
+    assert.equal(
+      (
+        await one(
+          f.db,
+          "SELECT metrics_status FROM custom_dim.published_posts WHERE id=$1",
+          [published.id],
+        )
+      ).metrics_status,
+      "unavailable",
+    );
+    await f.db.query(
+      "UPDATE custom_dim.social_accounts SET platform_id=$1,external_id=$2 WHERE id=$3",
+      [account.platform_id, account.external_id, account.id],
     );
     const next = await scoped(f.db, f.editActor, (tx) =>
       contentVersion(tx, f.editActor, content.id, {

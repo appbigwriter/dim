@@ -1,0 +1,22 @@
+FROM node:24.11.1-bookworm-slim AS runner
+WORKDIR /app
+
+# Instala dependências
+COPY package*.json ./
+COPY apps/web/package.json apps/web/package.json
+RUN npm ci
+
+# Copia código da aplicação
+COPY . .
+
+ENV NODE_ENV=production
+ENV HOST=0.0.0.0
+ENV PORT=3001
+
+USER node
+EXPOSE 3001
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:3001/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+
+CMD ["node", "--import", "tsx", "apps/api/src/main.ts"]

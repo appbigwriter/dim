@@ -1,8 +1,13 @@
 "use client";
+import ChannelCoverage from "./channel-coverage";
 import Link from "next/link";
 import { useEffect, useState, useCallback } from "react";
 import { api, authClient } from "./client";
 import { ResourceForm, JsonCommand, UploadPanel } from "./forms";
+import AnalyticsView from "./analytics-view";
+import AccessPanel from "./access-panel";
+import Wizard from "./onboarding-wizard";
+import CalendarView from "./calendar-view";
 import InboxView from "./inbox-view";
 import VersionDiff from "./version-diff";
 import {
@@ -249,190 +254,6 @@ function Login({ onSession }: { onSession: () => void }) {
     </main>
   );
 }
-function Wizard({
-  identity,
-  organization,
-  schema,
-  onDone,
-}: {
-  identity?: any;
-  organization: string;
-  schema: any;
-  onDone: (v: any) => void;
-}) {
-  const steps = [
-    "Identidade",
-    "Persona & direitos",
-    "Aprovação",
-    "Infraestrutura",
-    "Contas sociais",
-    "Editorial",
-    "Testes",
-    "Ativação",
-  ];
-  const codes = [
-    "identity",
-    "rights",
-    "approval",
-    "infrastructure",
-    "accounts",
-    "editorial",
-    "tests",
-    "activation",
-  ];
-  const [current, setCurrent] = useState(0),
-    [person, setPerson] = useState(identity),
-    [session, setSession] = useState<any>(),
-    [drafts, setDrafts] = useState<Record<string, any>>({}),
-    [value, setValue] = useState("{}"),
-    [status, setStatus] = useState(""),
-    [error, setError] = useState("");
-  const restore = useCallback(
-    async (p: any) => {
-      try {
-        setPerson(await api(`/influencers/${p.id}`, organization));
-        const sessions = await api(
-          `/onboarding-sessions?influencer_id=${p.id}`,
-          organization,
-        );
-        const s = sessions.data[0];
-        setSession(s);
-        const saved = await api(
-          `/onboarding-sessions/${s.id}/steps`,
-          organization,
-        );
-        const data = Object.fromEntries(
-          saved.data.map((r: any) => [r.step_code, r.data]),
-        );
-        setDrafts(data);
-        const index = codes.indexOf(s.current_step);
-        setCurrent(Math.max(0, index));
-        setValue(JSON.stringify(data[s.current_step] || {}, null, 2));
-      } catch (e) {
-        setError((e as Error).message);
-      }
-    },
-    [organization],
-  );
-  useEffect(() => {
-    if (identity) void restore(identity);
-  }, [identity, restore]);
-  useEffect(() => {
-    if (!session) return;
-    const timer = setTimeout(async () => {
-      try {
-        const data = JSON.parse(value);
-        await api(
-          `/onboarding-sessions/${session.id}/steps`,
-          organization,
-          "POST",
-          { step_code: codes[current], data, status: "in_progress" },
-        );
-        setStatus("Salvo agora");
-        setError("");
-        setDrafts((prev) => ({ ...prev, [codes[current]]: data }));
-      } catch (e) {
-        setStatus("Alterações ainda não salvas");
-        setError((e as Error).message);
-      }
-    }, 1000);
-    return () => clearTimeout(timer);
-  }, [value, current, session, organization]);
-  async function move(index: number) {
-    try {
-      if (session) {
-        const data = JSON.parse(value);
-        await api(
-          `/onboarding-sessions/${session.id}/steps`,
-          organization,
-          "POST",
-          { step_code: codes[current], data, status: "in_progress" },
-        );
-        setDrafts((prev) => ({ ...prev, [codes[current]]: data }));
-      }
-      setCurrent(index);
-      setValue(JSON.stringify(drafts[codes[index]] || {}, null, 2));
-      setError("");
-    } catch (e) {
-      setError((e as Error).message);
-      setStatus("Corrija ou salve a etapa antes de avançar.");
-    }
-  }
-  return (
-    <section className="panel wizard">
-      <div className="wizard-steps">
-        {steps.map((step, i) => (
-          <button
-            disabled={!person && i > 0}
-            key={step}
-            className={current === i ? "selected" : ""}
-            onClick={() => move(i)}
-          >
-            <span>{i + 1}</span>
-            {step}
-          </button>
-        ))}
-      </div>
-      <progress max={8} value={current + 1} aria-label="Etapas de onboarding" />
-      <h2>{steps[current]}</h2>
-      {error && <ErrorBanner error={error} />}
-      <p className="muted">
-        {status ||
-          "Progresso salvo por etapa. Requisitos e ativação são validados pelo servidor."}
-      </p>
-      {!person ? (
-        <ResourceForm
-          schema={schema}
-          organization={organization}
-          endpoint="/influencers"
-          onCancel={() => location.assign("/influencers")}
-          onSaved={async (p) => {
-            setPerson(p);
-            await restore(p);
-          }}
-        />
-      ) : (
-        <>
-          <p>
-            Identidade: <strong>{person.public_name}</strong> ·{" "}
-            <code>{person.id}</code>
-          </p>
-          <label>
-            Dados e evidências da etapa (JSON)
-            <textarea
-              rows={9}
-              value={value}
-              onChange={(e) => {
-                setValue(e.target.value);
-                setStatus("Salvando…");
-              }}
-            />
-          </label>
-          <p>
-            Documentos e aprovações devem ser registrados nas abas de governança
-            da identidade.
-          </p>
-          <div className="form-actions">
-            <button
-              disabled={current === 0}
-              className="secondary"
-              onClick={() => move(current - 1)}
-            >
-              Voltar
-            </button>
-            {current < 7 ? (
-              <button onClick={() => move(current + 1)}>Próxima etapa →</button>
-            ) : (
-              <button onClick={() => onDone(person)}>
-                Abrir ficha e validar ativação
-              </button>
-            )}
-          </div>
-        </>
-      )}
-    </section>
-  );
-}
 function Detail({
   id,
   kind,
@@ -529,6 +350,7 @@ function Detail({
           </div>
           {kind === "influencers" && (
             <>
+              <ChannelCoverage organization={organization} id={id} />
               <nav className="tabs">
                 {[
                   ["summary", "Resumo"],
@@ -808,8 +630,6 @@ export default function Workspace({ path }: { path: string }) {
     [creating, setCreating] = useState(path.endsWith("/new")),
     [detail, setDetail] = useState(""),
     [menu, setMenu] = useState(false),
-    [calendarView, setCalendarView] = useState("month"),
-    [month, setMonth] = useState(new Date().toISOString().slice(0, 7)),
     [locale, setLocale] = useState("pt-BR");
   const loadSession = useCallback(async () => {
     try {
@@ -1187,95 +1007,9 @@ export default function Workspace({ path }: { path: string }) {
               </div>
             </>
           ) : path === "/analytics" ? (
-            <section className="panel">
-              <h2>Receitas e custos por moeda</h2>
-              <div className="metrics">
-                {data?.financial?.map((f: any, i: number) => (
-                  <Metric
-                    key={i}
-                    label={f.kind === "cost" ? "Custo" : "Receita"}
-                    value={`${f.currency} ${f.amount}`}
-                    source="Eventos financeiros registrados"
-                  />
-                ))}
-              </div>
-              {!data?.financial?.length && (
-                <Empty description="Receitas e custos serão exibidos sem misturar moedas." />
-              )}
-              <h2>Métricas com frescor</h2>
-              {data?.metrics?.map((m: any) => (
-                <p key={m.metric_code}>
-                  {m.metric_code}: {m.value}{" "}
-                  <StatusChip status={m.stale ? "stale" : "success"} />
-                  <small>
-                    {m.source} ·{" "}
-                    {new Date(m.observed_at).toLocaleString(locale)}
-                  </small>
-                </p>
-              ))}
-              <small>
-                Atualizado:{" "}
-                {data?.as_of && new Date(data.as_of).toLocaleString(locale)}
-              </small>
-            </section>
+            <AnalyticsView organization={org} />
           ) : path === "/editorial/calendar" ? (
-            <section className="panel">
-              <div className="toolbar">
-                <input
-                  type="month"
-                  aria-label="Mês do calendário"
-                  value={month}
-                  onChange={(e) => setMonth(e.target.value)}
-                />
-                <select
-                  aria-label="Visualização do calendário"
-                  value={calendarView}
-                  onChange={(e) => setCalendarView(e.target.value)}
-                >
-                  <option value="month">Mês</option>
-                  <option value="week">Semana</option>
-                </select>
-              </div>
-              <div className={`calendar ${calendarView}`}>
-                {Array.from(
-                  {
-                    length:
-                      calendarView === "week"
-                        ? 7
-                        : new Date(
-                            Number(month.slice(0, 4)),
-                            Number(month.slice(5)),
-                            0,
-                          ).getDate(),
-                  },
-                  (_, i) => (
-                    <article key={i}>
-                      <span>{i + 1}</span>
-                      {dataset
-                        .filter(
-                          (event: any) =>
-                            new Date(event.planned_at)
-                              .toISOString()
-                              .slice(0, 10) ===
-                            `${month}-${String(i + 1).padStart(2, "0")}`,
-                        )
-                        .map((event: any) => (
-                          <div key={event.id} className="calendar-event">
-                            <StatusChip status={event.status} />
-                            <small>
-                              {new Date(event.planned_at).toLocaleString(
-                                locale,
-                                { timeZone: event.timezone },
-                              )}{" "}
-                              · {event.timezone}
-                            </small>
-                          </div>
-                        ))}
-                    </article>
-                  ),
-                )}
-              </div>
-            </section>
+            <CalendarView organization={org} />
           ) : path === "/inbox" ? (
             <InboxView organization={org} />
           ) : key || path === "/connectors" ? (
@@ -1459,6 +1193,7 @@ export default function Workspace({ path }: { path: string }) {
               </div>
               {key === "users" && (
                 <>
+                  <AccessPanel organization={org} />
                   <JsonCommand
                     title="Conceder ou revogar membership"
                     initial={{ user_id: "", status: "active" }}
@@ -1491,6 +1226,23 @@ export default function Workspace({ path }: { path: string }) {
                   }}
                   submit={(value) =>
                     api("/security/policy", org, "POST", value)
+                  }
+                />
+              )}
+              {key === "agent-runs" && (
+                <JsonCommand
+                  title="Conciliar custo reservado com comprovante"
+                  initial={{
+                    id: "",
+                    amount: "",
+                    currency: "USD",
+                    input_tokens: 0,
+                    output_tokens: 0,
+                    evidence_object_id: "",
+                    reason: "",
+                  }}
+                  submit={({ id, ...data }) =>
+                    api(`/agent-runs/${id}/reconcile-cost`, org, "POST", data)
                   }
                 />
               )}
@@ -1539,6 +1291,7 @@ export default function Workspace({ path }: { path: string }) {
               ["/legal-parties", "Titulares"],
               ["/identity-consents", "Imagem e voz"],
               ["/model-configs", "Modelos de IA"],
+              ["/agents/runs", "Execuções e custos IA"],
               ["/onboarding-tasks", "Tarefas de onboarding"],
               ["/account-tasks", "Tarefas de contas"],
             ].map(([href, label]) => (

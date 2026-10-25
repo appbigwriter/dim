@@ -1,3 +1,5 @@
+import { scoped } from "../packages/core/src/security";
+import { reconcileCost } from "../packages/core/src/completion";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { fixture } from "./helpers";
@@ -142,6 +144,57 @@ test("restricted model execution tracks tokens/cost, creates draft only, and ref
       /Orçamento/,
     );
     assert.equal(requested, 1);
+    const failed = await insert(f.db, "agent_runs", {
+      organization_id: f.org.id,
+      agent_assignment_id: assignment.id,
+      influencer_id: identity.id,
+      task_type: "content.generate",
+      status: "failed_reserved",
+      cost: "0.05",
+    });
+    const evidence = await insert(f.db, "storage_objects", {
+      organization_id: f.org.id,
+      influencer_id: identity.id,
+      bucket: "dim-private",
+      object_path: `${f.org.id}/bill.pdf`,
+      scan_status: "clean",
+    });
+    const settlement = {
+      amount: "0.0002",
+      currency: "USD",
+      input_tokens: 100,
+      output_tokens: 50,
+      evidence_object_id: evidence.id,
+      reason: "Fatura conferida",
+    };
+    await assert.rejects(() =>
+      scoped(f.db, f.editActor, (tx) =>
+        reconcileCost(tx, f.editActor, failed.id, settlement),
+      ),
+    );
+    assert(
+      (
+        await scoped(f.db, f.actor, (tx) =>
+          reconcileCost(tx, f.actor, failed.id, settlement),
+        )
+      ).reconciled,
+    );
+    await assert.rejects(
+      () =>
+        scoped(f.db, f.actor, (tx) =>
+          reconcileCost(tx, f.actor, failed.id, settlement),
+        ),
+      /reservados/,
+    );
+    assert.equal(
+      (
+        await f.db.query(
+          "SELECT * FROM custom_dim.cost_events WHERE cost_type=$1",
+          [`ai:${failed.id}`],
+        )
+      ).rows.length,
+      1,
+    );
   } finally {
     await f.db.close();
   }

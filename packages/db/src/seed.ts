@@ -9,6 +9,7 @@ export async function seedCatalog(db: DB) {
     ["x", "X"],
     ["cms", "Blog / CMS"],
     ["email", "E-mail"],
+    ["youtube", "YouTube"],
   ]) {
     await db.query(
       "INSERT INTO custom_dim.platforms(code,name) VALUES($1,$2) ON CONFLICT(code) DO NOTHING",

@@ -3,6 +3,7 @@ import { demand, text, uuid, type Actor } from "../../contracts/src/index";
 import { insert, one, type DB } from "../../db/src/index";
 import { audit, authorize, hash, member, resource } from "./security";
 import { operation } from "./editorial";
+import { templateParameters } from "../../connectors/src/templates";
 import { ProviderFailure } from "../../connectors/src/index";
 export async function ingest(
   db: DB,
@@ -136,8 +137,8 @@ export async function normalizeIncoming(db: DB, job: any) {
       contact_id: contact.id,
       external_thread_id: incoming.thread,
     });
-  await db.query(
-    `INSERT INTO custom_dim.messages(organization_id,conversation_id,provider_message_id,direction,body_reference,occurred_at) VALUES($1,$2,$3,'incoming',$4,$5) ON CONFLICT DO NOTHING`,
+  const inserted = await db.query(
+    `INSERT INTO custom_dim.messages(organization_id,conversation_id,provider_message_id,direction,body_reference,occurred_at) VALUES($1,$2,$3,'incoming',$4,$5) ON CONFLICT DO NOTHING RETURNING id`,
     [
       job.organization_id,
       conversation.id,
@@ -146,6 +147,18 @@ export async function normalizeIncoming(db: DB, job: any) {
       incoming.date,
     ],
   );
+  if (inserted.rows.length) {
+    const policy = await one(
+      db,
+      "SELECT settings FROM custom_dim.organization_settings WHERE organization_id=$1 AND module_key='inbox'",
+      [job.organization_id],
+    );
+    const hours = Number(policy?.settings.sla_hours || 24);
+    await db.query(
+      "UPDATE custom_dim.conversations SET unread_count=unread_count+1,sla_due_at=COALESCE(sla_due_at,now()+($1::text||' hours')::interval) WHERE id=$2",
+      [hours, conversation.id],
+    );
+  }
   await db.query(
     "UPDATE custom_dim.webhook_events SET processing_state='processed' WHERE id=$1",
     [job.payload.event_id],
@@ -158,6 +171,7 @@ export async function messageGuard(
   conversation: any,
   purpose: string,
   templateId?: string,
+  parameters: string[] = [],
 ) {
   authorize(actor, "inbox.write", {
     influencerId: conversation.influencer_id,
@@ -231,9 +245,16 @@ export async function messageGuard(
       "SELECT occurred_at FROM custom_dim.messages WHERE conversation_id=$1 AND direction='incoming' ORDER BY occurred_at DESC LIMIT 1",
       [conversation.id],
     );
+    const policy = await one(
+      db,
+      "SELECT settings FROM custom_dim.organization_settings WHERE organization_id=$1 AND module_key='inbox'",
+      [actor.organizationId],
+    );
     const inWindow =
-      last && Date.now() - new Date(last.occurred_at).getTime() < 86400000;
-    if (!inWindow || purpose === "marketing") {
+      last &&
+      Date.now() - new Date(last.occurred_at).getTime() <
+        Number(policy?.settings.whatsapp_window_hours || 24) * 3600000;
+    if (!inWindow || purpose === "marketing" || templateId) {
       demand(
         templateId,
         "TEMPLATE_REQUIRED",
@@ -265,6 +286,7 @@ export async function messageGuard(
         "TEMPLATE_UNAPPROVED",
         "Template sem aprovação do provedor",
       );
+      templateParameters(template, parameters);
       return { account, provider: platform.code, template };
     }
   }
@@ -282,11 +304,19 @@ export async function sendMessage(
       text: text,
       purpose: z.enum(["service", "marketing"]),
       template_id: uuid.optional(),
+      template_parameters: z.array(text).max(30).default([]),
     })
     .strict()
     .parse(input);
   const conversation = await resource(db, "conversations", id, actor);
-  await messageGuard(db, actor, conversation, data.purpose, data.template_id);
+  await messageGuard(
+    db,
+    actor,
+    conversation,
+    data.purpose,
+    data.template_id,
+    data.template_parameters,
+  );
   const result = await operation(
     db,
     actor,

@@ -1,4 +1,5 @@
-import { pageInput, type Actor } from "../../contracts/src/index";
+import { z } from "zod";
+import { demand, pageInput, type Actor } from "../../contracts/src/index";
 import { type DB } from "../../db/src/index";
 import { resources, readResources } from "./resources";
 import { authorize } from "./security";
@@ -138,26 +139,50 @@ export async function list(db: DB, actor: Actor, key: string, input: unknown) {
     total: count,
   };
 }
-export async function analytics(db: DB, actor: Actor) {
+export async function analytics(db: DB, actor: Actor, input: unknown = {}) {
   authorize(actor, "commercial.read");
-  const financial = await db.query(
-    `SELECT currency,sum(amount)::text AS amount,'revenue' AS kind FROM custom_dim.revenue_events WHERE organization_id=$1 GROUP BY currency UNION ALL SELECT currency,sum(amount)::text,'cost' FROM custom_dim.cost_events WHERE organization_id=$1 GROUP BY currency`,
-    [actor.organizationId],
+  const range = z
+    .object({
+      from: z.iso.datetime({ offset: true }).optional(),
+      to: z.iso.datetime({ offset: true }).optional(),
+    })
+    .parse(input);
+  const to = range.to || new Date().toISOString(),
+    from = range.from || new Date(Date.parse(to) - 30 * 86400000).toISOString();
+  const duration = Date.parse(to) - Date.parse(from);
+  demand(
+    duration > 0 && duration <= 366 * 86400000,
+    "INVALID_RANGE",
+    "Informe período de até 366 dias",
   );
-  const metrics = (
+  const previousFrom = new Date(Date.parse(from) - duration).toISOString();
+  const financial = (
     await db.query(
-      `SELECT metric_code,sum(metric_value)::text AS value,max(observed_at) AS observed_at,string_agg(DISTINCT provenance,', ') AS source FROM (SELECT DISTINCT ON(published_post_id,metric_code) * FROM custom_dim.publication_metrics WHERE organization_id=$1 ORDER BY published_post_id,metric_code,observed_at DESC,created_at DESC) latest GROUP BY metric_code`,
-      [actor.organizationId],
+      `WITH periods AS (SELECT 'current' AS period,$2::timestamptz AS starts,$3::timestamptz AS ends UNION ALL SELECT 'previous',$4::timestamptz,$2::timestamptz), events AS (SELECT currency,amount,'revenue' AS kind,occurred_at FROM custom_dim.revenue_events WHERE organization_id=$1 UNION ALL SELECT currency,amount,'cost',occurred_at FROM custom_dim.cost_events WHERE organization_id=$1) SELECT period,currency,kind,sum(amount)::text AS amount FROM events JOIN periods ON occurred_at>=starts AND occurred_at<ends GROUP BY period,currency,kind ORDER BY period,currency,kind`,
+      [actor.organizationId, from, to, previousFrom],
     )
   ).rows;
+  const metrics = (
+    await db.query(
+      `WITH periods AS (SELECT 'current' AS period,$2::timestamptz AS starts,$3::timestamptz AS ends UNION ALL SELECT 'previous',$4::timestamptz,$2::timestamptz), snapshots AS (SELECT DISTINCT ON(period,m.published_post_id,m.metric_code) periods.*,m.* FROM periods JOIN custom_dim.publication_metrics m ON m.organization_id=$1 AND m.observed_at<ends ORDER BY period,m.published_post_id,m.metric_code,m.observed_at DESC,m.created_at DESC), deltas AS (SELECT s.*,platform.code AS provider,CASE WHEN s.observed_at<starts THEN NULL WHEN baseline.metric_value IS NOT NULL THEN s.metric_value-baseline.metric_value WHEN p.published_at>=starts THEN s.metric_value ELSE NULL END AS delta FROM snapshots s JOIN custom_dim.published_posts p ON p.id=s.published_post_id JOIN custom_dim.publication_jobs j ON j.id=p.job_id JOIN custom_dim.social_accounts a ON a.id=j.social_account_id JOIN custom_dim.platforms platform ON platform.id=a.platform_id LEFT JOIN LATERAL(SELECT metric_value FROM custom_dim.publication_metrics b WHERE b.published_post_id=s.published_post_id AND b.metric_code=s.metric_code AND b.observed_at<starts ORDER BY b.observed_at DESC,b.created_at DESC LIMIT 1) baseline ON true) SELECT period,provider,metric_code,sum(metric_value)::text AS value,sum(delta)::text AS delta,count(*) FILTER(WHERE delta IS NULL)::int AS missing_baselines,max(observed_at) AS observed_at,min(observed_at) AS oldest_observed_at,string_agg(DISTINCT provenance,', ') AS source FROM deltas GROUP BY period,provider,metric_code ORDER BY period,provider,metric_code`,
+      [actor.organizationId, from, to, previousFrom],
+    )
+  ).rows.map((m) => ({
+    ...m,
+    stale: Date.now() - new Date(m.oldest_observed_at).getTime() > 86400000,
+  }));
   return {
-    financial: financial.rows,
-    metrics: metrics.map((m) => ({
-      ...m,
-      stale: Date.now() - new Date(m.observed_at).getTime() > 86400000,
-    })),
+    financial: financial.filter((f) => f.period === "current"),
+    metrics: metrics.filter((m) => m.period === "current"),
+    previous: {
+      financial: financial.filter((f) => f.period === "previous"),
+      metrics: metrics.filter((m) => m.period === "previous"),
+    },
+    period: { from, to, previous_from: previousFrom, previous_to: from },
     as_of: new Date().toISOString(),
     source: "custom_dim",
     currency_policy: "No aggregation across currencies",
+    metrics_policy:
+      "Cumulative snapshots at period end; delta requires baseline or post published within the period",
   };
 }

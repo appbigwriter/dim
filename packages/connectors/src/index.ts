@@ -205,7 +205,14 @@ export async function whatsappSend(
   to: string,
   payload: {
     text?: string;
-    template?: { name: string; language: { code: string } };
+    template?: {
+      name: string;
+      language: { code: string };
+      components?: {
+        type: string;
+        parameters: { type: string; text: string }[];
+      }[];
+    };
   },
 ) {
   const version = process.env.WHATSAPP_GRAPH_VERSION;

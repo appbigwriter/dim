@@ -108,6 +108,8 @@ test("signed webhooks deduplicate and normalize without interpreting incoming te
       "SELECT * FROM custom_dim.conversations WHERE id=$1",
       [normalized.conversation_id],
     );
+    assert.equal(conversation.unread_count, 1);
+    assert(conversation.sla_due_at);
     await assert.rejects(
       () =>
         scoped(f.db, f.actor, (tx) =>

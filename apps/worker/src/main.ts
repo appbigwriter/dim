@@ -1,3 +1,8 @@
+import {
+  monitorAccounts,
+  collectMetrics,
+} from "../../../packages/core/src/monitoring";
+import { templateParameters } from "../../../packages/connectors/src/templates";
 import "dotenv/config";
 import { Queue, Worker } from "bullmq";
 import { Redis } from "ioredis";
@@ -115,6 +120,7 @@ const worker = new Worker(
             conversation,
             operation.payload.purpose,
             operation.payload.template_id,
+            operation.payload.template_parameters || [],
           );
           const integration = await one(
             tx,
@@ -141,6 +147,10 @@ const worker = new Worker(
                         template: {
                           name: template.provider_template_id,
                           language: { code: template.language },
+                          components: templateParameters(
+                            template,
+                            operation.payload.template_parameters || [],
+                          ),
                         },
                       }
                     : { text: operation.payload.text },
@@ -320,11 +330,27 @@ const poll = async () => {
     polling = false;
   }
 };
+let monitoring = false;
+const monitor = async () => {
+  if (monitoring) return;
+  monitoring = true;
+  try {
+    await monitorAccounts(db, vault);
+    await collectMetrics(db, vault);
+  } catch {
+    console.error(JSON.stringify({ event: "monitoring_failed" }));
+  } finally {
+    monitoring = false;
+  }
+};
+const monitorTimer = setInterval(monitor, 60000);
+void monitor();
 const timer = setInterval(poll, 5000);
 await poll();
 for (const signal of ["SIGINT", "SIGTERM"])
   process.on(signal, async () => {
     clearInterval(timer);
+    clearInterval(monitorTimer);
     await worker.close();
     await queue.close();
     await dlq.close();

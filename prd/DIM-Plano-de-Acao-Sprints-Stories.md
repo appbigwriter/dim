@@ -6,6 +6,14 @@
 **Estimativa:** pontos Fibonacci aproximados, para refinamento em planning.  
 **Regra:** nenhuma sprint autoriza publicar por API sem permissão efetiva da plataforma.
 
+## Esclarecimento do escopo aprovado — 25/10/2026
+
+O produto deve contemplar **Blogs, Instagram, Facebook, X, WhatsApp, Telegram, E-mail, YouTube e CRM para todos os influenciadores**, respeitando titularidade e permissões próprias. O recorte de MVP com um conector social não substitui esse escopo integral. Uma identidade ativa e um canal conectado não comprovam a entrega da operação completa.
+
+A conferência em `docs/channel-coverage.md` identifica código ausente para Blogs, Instagram, Facebook, E-mail e YouTube. Cadastro no catálogo não conta como integração entregue. O CRM é módulo interno e não exige uma conta social externa; seus fluxos precisam estar funcionais por identidade.
+
+O aceite integral exige, por canal: cadastro/titularidade legítimos; vínculo à identidade; integração oficial; capacidades mínimas verificadas; criação e entrega do formato correspondente; status/erros auditados; e homologação real. A matriz de canais da ficha mostra cada pendência e não declara prontidão integral enquanto essas condições não forem comprovadas.
+
 ## Critérios de pronto globais
 
 História entregue somente após PR revisado, migration reversível ou expand/contract documentado, API tipada e validada, autenticação/RBAC, checagem de tenant, logging com correlation_id, testes unitários/integrados, casos de erro, atualização do runbook e homologação de produto. Alteração em conta externa exige idempotência e auditoria. As histórias de segurança exigem teste negativo cross-tenant. O backend não deve aceitar `organization_id` do cliente como autoridade.

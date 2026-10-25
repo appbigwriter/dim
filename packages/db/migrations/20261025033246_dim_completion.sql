@@ -13,4 +13,7 @@ ALTER TABLE custom_dim.editorial_calendar_items ADD CONSTRAINT fk_calendar_job_t
 CREATE UNIQUE INDEX calendar_job_unique ON custom_dim.editorial_calendar_items(publication_job_id) WHERE publication_job_id IS NOT NULL;
 CREATE INDEX inbox_unread ON custom_dim.conversations(organization_id,unread_count) WHERE unread_count>0;
 CREATE INDEX account_health_recent ON custom_dim.account_health_checks(social_account_id,checked_at DESC);
+ALTER TABLE custom_dim.published_posts ADD COLUMN metrics_attempted_at timestamptz;
+ALTER TABLE custom_dim.published_posts ADD COLUMN metrics_status text NOT NULL DEFAULT 'no_data';
+INSERT INTO custom_dim.platforms(code,name) VALUES('youtube','YouTube') ON CONFLICT(code) DO NOTHING;
 COMMIT;

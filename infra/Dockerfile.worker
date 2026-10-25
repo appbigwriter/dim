@@ -1,0 +1,19 @@
+FROM node:24.11.1-bookworm-slim AS runner
+WORKDIR /app
+
+# Instala dependências
+COPY package*.json ./
+COPY apps/web/package.json apps/web/package.json
+RUN npm ci
+
+# Copia código da aplicação
+COPY . .
+
+ENV NODE_ENV=production
+
+USER node
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD node --import tsx scripts/worker-health.ts
+
+CMD ["node", "--import", "tsx", "apps/worker/src/main.ts"]

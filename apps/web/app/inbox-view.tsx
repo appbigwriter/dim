@@ -11,6 +11,9 @@ export default function InboxView({ organization }: { organization: string }) {
     [text, setText] = useState(""),
     [purpose, setPurpose] = useState("service"),
     [template, setTemplate] = useState(""),
+    [parameters, setParameters] = useState(""),
+    [tags, setTags] = useState(""),
+    [contacts, setContacts] = useState<any[]>([]),
     [assignee, setAssignee] = useState(""),
     [note, setNote] = useState(""),
     [status, setStatus] = useState("open"),
@@ -45,9 +48,11 @@ export default function InboxView({ organization }: { organization: string }) {
     Promise.all([
       api(`/conversations/${selected.id}/messages`, organization),
       api(`/conversations/${selected.id}/context`, organization),
+      api("/contacts?per_page=100", organization),
     ])
-      .then(([m, c]) => {
+      .then(([m, c, contacts]) => {
         if (valid) {
+          setContacts(contacts.data);
           setMessages(m.data);
           setContext(c);
           setAssignee(selected.assigned_to || "");
@@ -81,6 +86,7 @@ export default function InboxView({ organization }: { organization: string }) {
               className={`conversation-row ${selected?.id === c.id ? "selected" : ""}`}
               onClick={() => {
                 setSelected(c);
+                setTags((c.tags || []).join(", "));
                 setMessages([]);
                 setContext(undefined);
               }}
@@ -90,6 +96,9 @@ export default function InboxView({ organization }: { organization: string }) {
               </strong>
               <small>{c.external_thread_id || c.id.slice(0, 8)}</small>
               <StatusChip status={c.status} />
+              <small>
+                {c.unread_count || 0} não lidas · {(c.tags || []).join(" · ")}
+              </small>
             </button>
           ))}
           {!conversations.length && (
@@ -133,7 +142,14 @@ export default function InboxView({ organization }: { organization: string }) {
                       {
                         text,
                         purpose,
-                        ...(template ? { template_id: template } : {}),
+                        ...(template
+                          ? {
+                              template_id: template,
+                              template_parameters: parameters
+                                ? parameters.split("\n")
+                                : [],
+                            }
+                          : {}),
                       },
                       crypto.randomUUID(),
                     );
@@ -181,6 +197,15 @@ export default function InboxView({ organization }: { organization: string }) {
                     </select>
                   </label>
                 </div>
+                {template && (
+                  <label>
+                    Variáveis do template (uma por linha, na ordem)
+                    <textarea
+                      value={parameters}
+                      onChange={(e) => setParameters(e.target.value)}
+                    />
+                  </label>
+                )}
                 <button disabled={busy}>
                   {busy ? "Enviando à fila…" : "Enviar resposta"}
                 </button>
@@ -202,6 +227,151 @@ export default function InboxView({ organization }: { organization: string }) {
           {context && (
             <>
               <h3>{context.contact.display_name}</h3>
+              <details>
+                <summary>Vincular contato duplicado</summary>
+                <form
+                  onSubmit={async (e) => {
+                    e.preventDefault();
+                    try {
+                      const data = new FormData(e.currentTarget);
+                      await api(
+                        `/contacts/${context.contact.id}/merge`,
+                        organization,
+                        "POST",
+                        {
+                          target_id: data.get("target"),
+                          reason: data.get("reason"),
+                        },
+                      );
+                      setRefresh((v) => v + 1);
+                      setError("");
+                    } catch (error) {
+                      setError((error as Error).message);
+                    }
+                  }}
+                >
+                  <p>
+                    O vínculo preserva as mensagens e consentimentos de cada
+                    cadastro.
+                  </p>
+                  <label>
+                    Cadastro principal
+                    <select required name="target">
+                      <option value="">Selecione</option>
+                      {contacts
+                        .filter(
+                          (c) =>
+                            c.id !== context.contact.id && !c.merged_into_id,
+                        )
+                        .map((c) => (
+                          <option value={c.id} key={c.id}>
+                            {c.display_name || c.id}
+                          </option>
+                        ))}
+                    </select>
+                  </label>
+                  <label>
+                    Motivo
+                    <textarea name="reason" required />
+                  </label>
+                  <button>Confirmar vínculo manual</button>
+                </form>
+              </details>
+              <form
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  try {
+                    await api(
+                      `/conversations/${selected.id}/preferences`,
+                      organization,
+                      "POST",
+                      {
+                        tags: tags
+                          .split(",")
+                          .map((t) => t.trim())
+                          .filter(Boolean),
+                        mark_read: true,
+                      },
+                    );
+                    setRefresh((v) => v + 1);
+                    setError("");
+                  } catch (error) {
+                    setError((error as Error).message);
+                  }
+                }}
+              >
+                <label>
+                  Tags separadas por vírgula
+                  <input
+                    value={tags}
+                    onChange={(e) => setTags(e.target.value)}
+                  />
+                </label>
+                <button>Salvar tags e marcar como lida</button>
+              </form>
+              <button
+                className="secondary"
+                onClick={async () => {
+                  try {
+                    const result = await api(
+                      `/contacts/${context.contact.id}/export`,
+                      organization,
+                    );
+                    const url = URL.createObjectURL(
+                      new Blob([JSON.stringify(result, null, 2)], {
+                        type: "application/json",
+                      }),
+                    );
+                    const link = document.createElement("a");
+                    link.href = url;
+                    link.download = `contato-${context.contact.id}.json`;
+                    link.click();
+                    URL.revokeObjectURL(url);
+                  } catch (error) {
+                    setError((error as Error).message);
+                  }
+                }}
+              >
+                Exportar dados do contato
+              </button>
+              <details>
+                <summary>Solicitação do titular</summary>
+                <form
+                  onSubmit={async (e) => {
+                    e.preventDefault();
+                    try {
+                      const data = new FormData(e.currentTarget);
+                      await api(
+                        `/contacts/${context.contact.id}/privacy-request`,
+                        organization,
+                        "POST",
+                        {
+                          request_type: data.get("type"),
+                          reason: data.get("reason"),
+                        },
+                      );
+                      setError("Solicitação registrada para revisão humana.");
+                    } catch (error) {
+                      setError((error as Error).message);
+                    }
+                  }}
+                >
+                  <label>
+                    Solicitação
+                    <select name="type">
+                      <option value="access">Acesso</option>
+                      <option value="correction">Correção</option>
+                      <option value="erasure">Exclusão</option>
+                      <option value="restriction">Restrição</option>
+                    </select>
+                  </label>
+                  <label>
+                    Justificativa
+                    <textarea required name="reason" />
+                  </label>
+                  <button>Registrar solicitação</button>
+                </form>
+              </details>
               <small>
                 {context.contact.locale} · {context.contact.status}
               </small>

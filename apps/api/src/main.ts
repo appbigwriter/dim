@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { decodeJwt } from "jose";
 import { Redis } from "ioredis";
 import { postgres, one } from "../../../packages/db/src/index";
+import { migrate } from "../../../packages/db/src/migrate";
 import { supabaseAuth } from "../../../packages/core/src/access";
 import { demand } from "../../../packages/contracts/src/index";
 import { HashicorpVault } from "../../../packages/connectors/src/index";
@@ -14,6 +15,11 @@ import {
 for (const key of ["DATABASE_URL", "SUPABASE_URL", "SUPABASE_ANON_KEY"])
   if (!process.env[key]) throw new Error(`Configure ${key}`);
 const db = postgres(process.env.DATABASE_URL!);
+if (process.env.AUTO_MIGRATE === "true") {
+  console.log("[API] Executando migrações automáticas de banco de dados...");
+  await migrate(db);
+  console.log("[API] Migrações concluídas com sucesso.");
+}
 const client = createClient(
   process.env.SUPABASE_URL!,
   process.env.SUPABASE_ANON_KEY!,
@@ -53,12 +59,28 @@ const app = await buildApp({
   vault,
   storage,
   scan,
-  invite: process.env.SUPABASE_SERVICE_ROLE_KEY ? async (email, id) => {
-    const admin = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, {auth:{persistSession:false, autoRefreshToken:false}});
-    const {data,error} = await admin.auth.admin.inviteUserByEmail(email, {redirectTo:`${process.env.WEB_ORIGIN || 'http://localhost:3000'}/accept-invitation/${id}`});
-    demand(!error && data.user, 'INVITATION_FAILED', 'Auth não confirmou o convite', 502);
-    return {userId:data.user.id};
-  } : undefined,
+  invite: process.env.SUPABASE_SERVICE_ROLE_KEY
+    ? async (email, id) => {
+        const admin = createClient(
+          process.env.SUPABASE_URL!,
+          process.env.SUPABASE_SERVICE_ROLE_KEY!,
+          { auth: { persistSession: false, autoRefreshToken: false } },
+        );
+        const { data, error } = await admin.auth.admin.inviteUserByEmail(
+          email,
+          {
+            redirectTo: `${process.env.WEB_ORIGIN || "http://localhost:3000"}/accept-invitation/${id}`,
+          },
+        );
+        demand(
+          !error && data.user,
+          "INVITATION_FAILED",
+          "Auth não confirmou o convite",
+          502,
+        );
+        return { userId: data.user.id };
+      }
+    : undefined,
   authenticate: supabaseAuth(
     db,
     process.env.SUPABASE_URL!,
@@ -103,7 +125,9 @@ const app = await buildApp({
   },
 });
 await app.listen({
-  host: process.env.HOST || "127.0.0.1",
+  host:
+    process.env.HOST ||
+    (process.env.NODE_ENV === "production" ? "0.0.0.0" : "127.0.0.1"),
   port: Number(process.env.PORT || 3001),
 });
 for (const signal of ["SIGINT", "SIGTERM"])

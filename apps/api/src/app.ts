@@ -77,6 +77,7 @@ import {
 } from "../../../packages/connectors/src/storage";
 import { executeAutomation } from "../../../packages/core/src/automation";
 import { sameSecret } from "../../../packages/connectors/src/index";
+import { fetchWhatsappTemplates } from "../../../packages/connectors/src/templates";
 import { completionRoutes } from "./completion-routes";
 import type { Inviter } from "../../../packages/core/src/invitations";
 type Options = {
@@ -86,7 +87,9 @@ type Options = {
     org: string,
     correlationId: string,
   ) => Promise<Actor>;
-  session?: (token: string) => Promise<{ userId: string; aal: string; emailVerified?: boolean }>;
+  session?: (
+    token: string,
+  ) => Promise<{ userId: string; aal: string; emailVerified?: boolean }>;
   invite?: Inviter;
   vault?: Vault;
   storage?: PrivateStorage;
@@ -753,7 +756,8 @@ export async function buildApp(opts: Options) {
           a,
         );
         demand(
-          evidence.scan_status === "clean",
+          evidence.scan_status === "clean" &&
+            evidence.influencer_id === parent.influencer_id,
           "FILE_NOT_CLEAN",
           "Evidência não liberada",
         );
@@ -952,7 +956,10 @@ export async function buildApp(opts: Options) {
         a,
       );
       demand(
-        evidence.scan_status === "clean",
+        evidence.scan_status === "clean" &&
+          evidence.influencer_id ===
+            (await resource(db, "social_accounts", job.social_account_id, a))
+              .influencer_id,
         "FILE_NOT_CLEAN",
         "Evidência não liberada",
       );
@@ -1054,15 +1061,22 @@ export async function buildApp(opts: Options) {
           [a.organizationId, c.social_account_id],
         )
       ).rows,
-      sla_hours: 24,
+      sla_hours:
+        (
+          await one(
+            db,
+            "SELECT settings FROM custom_dim.organization_settings WHERE organization_id=$1 AND module_key='inbox'",
+            [a.organizationId],
+          )
+        )?.settings.sla_hours || 24,
       opened_at: c.opened_at,
     };
   });
   route("POST", "/conversations/:id/handoff", json, async (db, a, r) =>
     handoff(db, a, uuid.parse((r.params as any).id), r.body),
   );
-  route("GET", "/analytics/overview", undefined, async (db, a) =>
-    analytics(db, a),
+  route("GET", "/analytics/overview", undefined, async (db, a, r) =>
+    analytics(db, a, r.query),
   );
   route(
     "POST",
@@ -1419,21 +1433,13 @@ export async function buildApp(opts: Options) {
         "GRAPH_VERSION_REQUIRED",
         "Configure versão Graph",
       );
-      const response = await fetch(
-        `https://graph.facebook.com/${version}/${secret.waba_id}/message_templates?fields=id,name,status,language,category,components&limit=100`,
-        {
-          headers: { Authorization: `Bearer ${secret.token}` },
-          signal: AbortSignal.timeout(10000),
-          redirect: "error",
-        },
-      );
-      demand(
-        response.ok,
-        "TEMPLATES_UNAVAILABLE",
-        "Falha ao consultar templates",
-        502,
-      );
-      const result = await response.json();
+      const result = {
+        data: await fetchWhatsappTemplates(
+          secret.token,
+          secret.waba_id,
+          version,
+        ),
+      };
       await db.query(
         "UPDATE custom_dim.message_templates SET approval_status='stale' WHERE organization_id=$1 AND provider='whatsapp' AND content->>'social_account_id'=$2",
         [a.organizationId, account.id],
@@ -1458,11 +1464,11 @@ export async function buildApp(opts: Options) {
         });
       await audit(db, a, "sync_templates", "social_accounts", account.id, {
         count: result.data?.length || 0,
-        partial: !!result.paging?.next,
+        partial: false,
       });
       return {
         count: result.data?.length || 0,
-        partial: !!result.paging?.next,
+        partial: false,
       };
     },
   );
