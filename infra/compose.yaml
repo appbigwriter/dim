@@ -1,0 +1,84 @@
+name: dim-${APP_ENV:-staging}
+services:
+  dim-api:
+    image: ${DIM_API_IMAGE:-dim-api:local}
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile
+      target: api
+      args:
+        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+    env_file:
+      - path: ../.env
+        required: false
+    environment:
+      HOST: 0.0.0.0
+      PORT: 3001
+      REDIS_URL: redis://dim-redis:6379
+    restart: unless-stopped
+    networks: [backend, egress]
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    depends_on:
+      dim-redis:
+        condition: service_healthy
+  dim-worker:
+    image: ${DIM_WORKER_IMAGE:-dim-worker:local}
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile
+      target: worker
+    env_file:
+      - path: ../.env
+        required: false
+    environment:
+      REDIS_URL: redis://dim-redis:6379
+    restart: unless-stopped
+    networks: [backend, egress]
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    depends_on:
+      dim-redis:
+        condition: service_healthy
+  dim-web:
+    image: ${DIM_WEB_IMAGE:-dim-web:local}
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile
+      target: web
+      args:
+        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+    environment:
+      API_INTERNAL_URL: http://dim-api:3001
+    ports: [127.0.0.1:3000:3000]
+    restart: unless-stopped
+    networks: [backend, egress]
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+  dim-redis:
+    image: redis:7.4.6-alpine
+    command: [redis-server, --appendonly, "yes", --protected-mode, "no"]
+    volumes: [redis-data:/data]
+    restart: unless-stopped
+    networks: [backend]
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+networks:
+  backend:
+    internal: true
+  egress: {}
+volumes:
+  redis-data: {}

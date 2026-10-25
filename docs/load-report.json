@@ -1,0 +1,39 @@
+{
+  "executed_at": "2026-10-24T22:40:14.156Z",
+  "environment": "Local PGlite + Fastify injection, sequential HTTP simulation; not a VPS/Supabase/Redis capacity benchmark",
+  "results": [
+    {
+      "influencers": 10,
+      "requests": 120,
+      "concurrency": 1,
+      "seed_ms": 115.8,
+      "p50_ms": 2.81,
+      "p95_ms": 3.81,
+      "max_ms": 29.61,
+      "errors": 0,
+      "correlation_example": "76f50e18-9e89-406d-956e-e1203f20baf3"
+    },
+    {
+      "influencers": 50,
+      "requests": 120,
+      "concurrency": 1,
+      "seed_ms": 484.2,
+      "p50_ms": 3.54,
+      "p95_ms": 4.57,
+      "max_ms": 5.58,
+      "errors": 0,
+      "correlation_example": "1e7550ce-41ba-405a-b809-05cb2c9770d8"
+    },
+    {
+      "influencers": 100,
+      "requests": 120,
+      "concurrency": 1,
+      "seed_ms": 995.7,
+      "p50_ms": 3.63,
+      "p95_ms": 5.2,
+      "max_ms": 6.25,
+      "errors": 0,
+      "correlation_example": "aaf43ac9-d85e-4068-bc49-1926735c6f12"
+    }
+  ]
+}

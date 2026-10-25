@@ -1,0 +1,11 @@
+BEGIN;
+ALTER TABLE custom_dim.storage_objects ADD COLUMN influencer_id uuid;
+ALTER TABLE custom_dim.storage_objects ADD COLUMN scan_status text NOT NULL DEFAULT 'pending' CHECK(scan_status IN('pending','clean','rejected'));
+ALTER TABLE custom_dim.storage_objects ADD CONSTRAINT fk_storage_identity_tenant FOREIGN KEY(organization_id,influencer_id) REFERENCES custom_dim.influencers(organization_id,id);
+CREATE INDEX storage_identity ON custom_dim.storage_objects(organization_id,influencer_id);
+CREATE UNIQUE INDEX one_active_thread ON custom_dim.conversations(organization_id,social_account_id,external_thread_id) WHERE status='open' AND external_thread_id IS NOT NULL;
+REVOKE UPDATE,DELETE,TRUNCATE ON custom_dim.revenue_events,custom_dim.cost_events FROM dim_app,service_role;
+CREATE TRIGGER immutable_revenue_events BEFORE UPDATE OR DELETE ON custom_dim.revenue_events FOR EACH ROW EXECUTE FUNCTION custom_dim.reject_mutation();
+CREATE TRIGGER immutable_cost_events BEFORE UPDATE OR DELETE ON custom_dim.cost_events FOR EACH ROW EXECUTE FUNCTION custom_dim.reject_mutation();
+REVOKE ALL ON custom_dim.schema_migrations FROM dim_app,service_role;
+COMMIT;

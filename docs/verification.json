@@ -1,0 +1,37 @@
+{
+  "recorded_at": "2026-10-24T22:49:02.2893357Z",
+  "tests": {
+    "command": "npm test",
+    "skipped": 0,
+    "failed": 0,
+    "passed": 12
+  },
+  "lint": "passed",
+  "typecheck": "passed",
+  "web_build": "passed",
+  "npm_audit": {
+    "vulnerabilities": 0
+  },
+  "compose_config": "passed",
+  "migration_mirrors": "identical",
+  "domain_tables": 79,
+  "openapi_paths": 129,
+  "browser": {
+    "dashboard": "passed",
+    "environment": "loopback disposable fixture",
+    "onboarding_flush_and_resume": "passed",
+    "mobile_viewport": "not_verified",
+    "create_identity": "passed",
+    "login": "passed"
+  },
+  "load_report": "docs/load-report.json",
+  "recovery_report": "docs/recovery-report.json",
+  "external": {
+    "github_ci": "not_run_no_remote",
+    "codeql": "configured_not_run",
+    "official_social_publish": "not_executed",
+    "production": "not_modified",
+    "supabase_staging": "not_connected",
+    "docker_images": "not_built_daemon_unavailable"
+  }
+}

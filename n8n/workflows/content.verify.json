@@ -1,0 +1,73 @@
+{
+  "name": "DIM · content.verify",
+  "active": false,
+  "nodes": [
+    {
+      "id": "entry",
+      "name": "DIM authenticated command",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "dim/content.verify",
+        "authentication": "headerAuth",
+        "responseMode": "lastNode"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "DIM inbound service"
+        }
+      }
+    },
+    {
+      "id": "execute",
+      "name": "Execute bounded DIM operation",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        300,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.DIM_API_INTERNAL_URL + \"/api/v1/automation/execute\" }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ operation_id: $json.body.operation_id }) }}",
+        "options": {
+          "timeout": 90000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "DIM outbound service"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "DIM authenticated command": {
+      "main": [
+        [
+          {
+            "node": "Execute bounded DIM operation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataSuccessExecution": "none",
+    "saveDataErrorExecution": "none"
+  },
+  "tags": []
+}

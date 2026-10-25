@@ -1,0 +1,18 @@
+groups:
+  - name: dim
+    rules:
+      - alert: DIMNotReady
+        expr: probe_success{job="dim-ready"} == 0
+        for: 2m
+        labels: {severity: critical}
+        annotations: {summary: 'DIM não está pronto para atender'}
+      - alert: DIMDiskLow
+        expr: node_filesystem_avail_bytes / node_filesystem_size_bytes < 0.15
+        for: 5m
+        labels: {severity: warning}
+        annotations: {summary: 'Disco abaixo de 15% livre'}
+      - alert: DIMExternalJobsUncertain
+        expr: dim_publication_uncertain > 0
+        for: 2m
+        labels: {severity: warning}
+        annotations: {summary: 'Publicações exigem reconciliação humana'}

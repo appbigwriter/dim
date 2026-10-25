@@ -1,0 +1,46 @@
+name: DIM validation
+on: [push, pull_request]
+permissions: { contents: read }
+jobs:
+  sast:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: javascript-typescript
+          build-mode: none
+      - uses: github/codeql-action/analyze@v4
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "24.11.1", cache: npm }
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm audit --audit-level=high
+      - run: npm run openapi
+      - run: npm run build
+      - run: docker compose -f infra/compose.yaml config --quiet
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dim-validation
+          path: |
+            docs/openapi.json
+            docs/implementation-status.md
+  container:
+    needs: validate
+    runs-on: ubuntu-latest
+    strategy:
+      matrix: { target: [api, worker, web] }
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build --target ${{ matrix.target }} --tag dim-${{ matrix.target }}:${{ github.sha }} --file infra/Dockerfile .
+      # Deployment requires staging verification and the Easypanel environment gate.

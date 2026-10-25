@@ -1,0 +1,59 @@
+{
+  "name": "DIM · identity.onboard",
+  "active": false,
+  "nodes": [
+    {
+      "id": "entry",
+      "name": "DIM authenticated command",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "dim/identity.onboard",
+        "authentication": "headerAuth",
+        "responseMode": "lastNode"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "DIM inbound service"
+        }
+      }
+    },
+    {
+      "id": "handoff",
+      "name": "Preserve request for human workflow",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        300,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const command = $input.first().json.body;\nif (!command?.operation_id || !command?.organization_id) throw new Error('Invalid DIM command');\nreturn [{json: {completed:false, requires_human:true, workflow:\"identity.onboard\", operation_id:command.operation_id, reason:'Configure and validate the organization-specific workflow before automation.'}}];"
+      }
+    }
+  ],
+  "connections": {
+    "DIM authenticated command": {
+      "main": [
+        [
+          {
+            "node": "Preserve request for human workflow",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataSuccessExecution": "none",
+    "saveDataErrorExecution": "none"
+  },
+  "tags": []
+}

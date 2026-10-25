@@ -1,0 +1,16 @@
+BEGIN;
+ALTER TABLE custom_dim.organization_members ADD COLUMN invitation_email text;
+ALTER TABLE custom_dim.organization_members ADD COLUMN invitation_expires_at timestamptz;
+ALTER TABLE custom_dim.contacts ADD COLUMN merged_into_id uuid;
+ALTER TABLE custom_dim.contacts ADD CONSTRAINT fk_contact_merge_tenant FOREIGN KEY(organization_id,merged_into_id) REFERENCES custom_dim.contacts(organization_id,id);
+ALTER TABLE custom_dim.conversations ADD COLUMN tags jsonb NOT NULL DEFAULT '[]' CHECK(jsonb_typeof(tags)='array');
+ALTER TABLE custom_dim.conversations ADD COLUMN unread_count integer NOT NULL DEFAULT 0 CHECK(unread_count>=0);
+ALTER TABLE custom_dim.conversations ADD COLUMN last_read_at timestamptz;
+ALTER TABLE custom_dim.conversations ADD COLUMN sla_due_at timestamptz;
+ALTER TABLE custom_dim.publication_jobs ADD COLUMN row_version integer NOT NULL DEFAULT 1;
+ALTER TABLE custom_dim.editorial_calendar_items ADD COLUMN publication_job_id uuid;
+ALTER TABLE custom_dim.editorial_calendar_items ADD CONSTRAINT fk_calendar_job_tenant FOREIGN KEY(organization_id,publication_job_id) REFERENCES custom_dim.publication_jobs(organization_id,id);
+CREATE UNIQUE INDEX calendar_job_unique ON custom_dim.editorial_calendar_items(publication_job_id) WHERE publication_job_id IS NOT NULL;
+CREATE INDEX inbox_unread ON custom_dim.conversations(organization_id,unread_count) WHERE unread_count>0;
+CREATE INDEX account_health_recent ON custom_dim.account_health_checks(social_account_id,checked_at DESC);
+COMMIT;
