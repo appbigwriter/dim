@@ -53,6 +53,12 @@ const app = await buildApp({
   vault,
   storage,
   scan,
+  invite: process.env.SUPABASE_SERVICE_ROLE_KEY ? async (email, id) => {
+    const admin = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, {auth:{persistSession:false, autoRefreshToken:false}});
+    const {data,error} = await admin.auth.admin.inviteUserByEmail(email, {redirectTo:`${process.env.WEB_ORIGIN || 'http://localhost:3000'}/accept-invitation/${id}`});
+    demand(!error && data.user, 'INVITATION_FAILED', 'Auth não confirmou o convite', 502);
+    return {userId:data.user.id};
+  } : undefined,
   authenticate: supabaseAuth(
     db,
     process.env.SUPABASE_URL!,
@@ -77,6 +83,7 @@ const app = await buildApp({
     );
     return {
       userId: data.user.id,
+      emailVerified: Boolean(data.user.email_confirmed_at),
       aal: String(decodeJwt(token).aal || "aal1"),
     };
   },

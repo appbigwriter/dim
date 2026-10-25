@@ -120,6 +120,7 @@ export function supabaseAuth(db: Database, url: string, key: string) {
       "SessÃ£o revogada",
       401,
     );
+    demand(!(await one(db, "SELECT id FROM custom_dim.organization_settings WHERE organization_id=$1 AND module_key=$2", [organizationId, `revoked_session:${claims.session_id}`])), "SESSION_REVOKED", "Sessão revogada nesta organização", 401);
     return loadActor(
       db,
       data.user.id,

@@ -394,6 +394,7 @@ export async function schedule(
     actor,
   );
   await insert(db, "editorial_calendar_items", {
+    publication_job_id: row.id,
     organization_id: actor.organizationId,
     influencer_id: identity.id,
     content_id: version.content_id,

@@ -77,6 +77,8 @@ import {
 } from "../../../packages/connectors/src/storage";
 import { executeAutomation } from "../../../packages/core/src/automation";
 import { sameSecret } from "../../../packages/connectors/src/index";
+import { completionRoutes } from "./completion-routes";
+import type { Inviter } from "../../../packages/core/src/invitations";
 type Options = {
   db: Database;
   authenticate: (
@@ -84,7 +86,8 @@ type Options = {
     org: string,
     correlationId: string,
   ) => Promise<Actor>;
-  session?: (token: string) => Promise<{ userId: string; aal: string }>;
+  session?: (token: string) => Promise<{ userId: string; aal: string; emailVerified?: boolean }>;
+  invite?: Inviter;
   vault?: Vault;
   storage?: PrivateStorage;
   scan?: (data: Buffer) => Promise<void>;
@@ -1581,6 +1584,7 @@ export async function buildApp(opts: Options) {
       correlation_id: r.id,
     }),
   );
+  completionRoutes(app, route, opts, auth);
   await app.ready();
   return app;
 }
