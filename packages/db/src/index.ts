@@ -10,11 +10,31 @@ export interface Database extends DB {
   close(): Promise<void>;
 }
 export function postgres(url: string): Database {
+  const isLocal =
+    url.includes("localhost") ||
+    url.includes("127.0.0.1") ||
+    url.includes("dim-postgres");
+  const forceSsl =
+    process.env.DB_SSL === "true" ||
+    url.includes("sslmode=require") ||
+    url.includes("ssl=true");
+  const disableSsl =
+    url.includes("sslmode=disable") || process.env.DB_SSL === "false";
+
   const pool = new pg.Pool({
     connectionString: url,
     max: 12,
-    connectionTimeoutMillis: 5000,
+    connectionTimeoutMillis: 10000,
     statement_timeout: 15000,
+    ssl: disableSsl
+      ? false
+      : forceSsl || !isLocal
+        ? { rejectUnauthorized: false }
+        : undefined,
+  });
+
+  pool.on("error", (err) => {
+    console.error("[PostgreSQL Pool Error]", err.message);
   });
   return {
     query: pool.query.bind(pool) as DB["query"],
