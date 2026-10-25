@@ -1,3 +1,10 @@
+import {
+  bindAudience,
+  audienceState,
+  syncAudience,
+} from "../../../packages/core/src/audience";
+import { audienceBindingInput } from "../../../packages/contracts/src/audience";
+import type { AudienceProvider } from "../../../packages/connectors/src/audience";
 import { identityChannels } from "../../../packages/core/src/channels";
 import { z } from "zod";
 import type { FastifyInstance, FastifyRequest } from "fastify";
@@ -47,12 +54,43 @@ export function completionRoutes(
   opts: {
     db: Database;
     invite?: Inviter;
+    audience?: AudienceProvider;
     session?: (
       token: string,
     ) => Promise<{ userId: string; emailVerified?: boolean }>;
   },
   auth: (request: FastifyRequest) => Promise<void>,
 ) {
+  route(
+    "POST",
+    "/influencers/:id/audience/bind",
+    audienceBindingInput,
+    (db, a, r) => bindAudience(db, a, uuid.parse(r.params.id), r.body),
+  );
+  route("GET", "/influencers/:id/audience", undefined, (db, a, r) =>
+    audienceState(db, a, uuid.parse(r.params.id)),
+  );
+  route("GET", "/influencers/:id/audience/context", undefined, (db, a, r) =>
+    audienceState(db, a, uuid.parse(r.params.id), true),
+  );
+  app.post(
+    "/api/v1/influencers/:id/audience/sync",
+    { preHandler: auth, schema: { body: z.object({}).strict() } },
+    async (req) => {
+      demand(
+        opts.audience,
+        "AUDIENCE_NOT_CONFIGURED",
+        "Configure a conexão Audience no cofre e a API oficial de contexto",
+        503,
+      );
+      return syncAudience(
+        opts.db,
+        (req as any).actor,
+        uuid.parse((req.params as any).id),
+        opts.audience,
+      );
+    },
+  );
   route("GET", "/influencers/:id/channels", undefined, (db, a, r) =>
     identityChannels(db, a, uuid.parse(r.params.id)),
   );

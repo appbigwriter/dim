@@ -21,3 +21,7 @@ A ficha de cada identidade mostra os nove itens, o estágio de implementação e
 O YouTube não aparecia no seed inicial. A quarta migration e o seed passam a incluí-lo como plataforma, sem declarar publicação de vídeo implementada.
 
 As lacunas de Blogs, Instagram, Facebook, E-mail e YouTube incluem **código ainda ausente**, além de credenciais/aprovações externas. Não devem ser apresentadas apenas como configuração pendente.
+
+## Integração Audience Builder confirmada em 25/10/2026
+
+A persona, o plano de autoridade e a gestão editorial dos blogs pertencem ao Audience Builder; o DIM executa as ações aprovadas nos canais e devolve resultados. A sincronização do contexto foi preparada/testada localmente, sem criar um CMS ou uma persona paralelos. Isso não implementa os adaptadores de publicação/provisionamento que ainda faltam, nem o ciclo de pedidos/receipts remoto. Ver `docs/audience-integration.md`.

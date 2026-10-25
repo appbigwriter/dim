@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import { api } from "./client";
+import AudiencePanel from "./audience-panel";
 import { ResourceForm, UploadPanel } from "./forms";
 import { ErrorBanner, StatusChip } from "../../../packages/ui/src/index";
 const codes = [
@@ -200,6 +201,10 @@ export default function Wizard({
               ficha da identidade.
             </p>
           )}
+          {code === "rights" &&
+            person.persona_source === "audience_builder" && (
+              <AudiencePanel organization={organization} id={person.id} />
+            )}
           {code === "rights" && (
             <>
               <p>
@@ -209,45 +214,46 @@ export default function Wizard({
                     ? "Registre contrato, usos humanos e sintéticos, persona e transparência."
                     : "Registre persona aprovada e transparência por canal."}
               </p>
-              {person.type !== "human" && (
-                <div className="panel">
-                  {field("public_bio", "Biografia pública", true)}
-                  {field("tone", "Tom de voz")}
-                  {field("traits", "Traços de personalidade")}
-                  {field("knowledge", "Conhecimentos permitidos", true)}
-                  {field("boundaries", "Limites e temas proibidos", true)}
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={!!draft.approve_persona}
-                      onChange={(e) =>
-                        setDraft({
-                          ...draft,
-                          approve_persona: e.target.checked,
+              {person.type !== "human" &&
+                person.persona_source !== "audience_builder" && (
+                  <div className="panel">
+                    {field("public_bio", "Biografia pública", true)}
+                    {field("tone", "Tom de voz")}
+                    {field("traits", "Traços de personalidade")}
+                    {field("knowledge", "Conhecimentos permitidos", true)}
+                    {field("boundaries", "Limites e temas proibidos", true)}
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={!!draft.approve_persona}
+                        onChange={(e) =>
+                          setDraft({
+                            ...draft,
+                            approve_persona: e.target.checked,
+                          })
+                        }
+                      />
+                      Aprovar esta versão com minha permissão de revisão
+                    </label>
+                    <button
+                      disabled={busy}
+                      onClick={() =>
+                        void command(`/influencers/${person.id}/personas`, {
+                          public_bio: draft.public_bio,
+                          tone: { description: draft.tone || "" },
+                          traits: { description: draft.traits || "" },
+                          knowledge: { description: draft.knowledge || "" },
+                          boundaries: { description: draft.boundaries || "" },
+                          approval_status: draft.approve_persona
+                            ? "approved"
+                            : "draft",
                         })
                       }
-                    />
-                    Aprovar esta versão com minha permissão de revisão
-                  </label>
-                  <button
-                    disabled={busy}
-                    onClick={() =>
-                      void command(`/influencers/${person.id}/personas`, {
-                        public_bio: draft.public_bio,
-                        tone: { description: draft.tone || "" },
-                        traits: { description: draft.traits || "" },
-                        knowledge: { description: draft.knowledge || "" },
-                        boundaries: { description: draft.boundaries || "" },
-                        approval_status: draft.approve_persona
-                          ? "approved"
-                          : "draft",
-                      })
-                    }
-                  >
-                    Registrar nova versão da persona
-                  </button>
-                </div>
-              )}
+                    >
+                      Registrar nova versão da persona
+                    </button>
+                  </div>
+                )}
             </>
           )}
           {code === "approval" && (

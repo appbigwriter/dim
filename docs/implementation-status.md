@@ -2,7 +2,7 @@
 
 Data: 25/10/2026. Base: `prd/DIM-PRD-v1.0.md`, `prd/DIM-Plano-de-Acao-Sprints-Stories.md` e `prd/dim-dev-doc.md`.
 
-**Entrega de engenharia local, sem publicação em produção.** Foram criados o monorepo, quatro migrations, aplicação Web/API/worker, conectores, testes e documentação. A matriz abaixo registra as 40 Stories; nenhuma linha representa homologação de produto, PR aprovado ou gate de infraestrutura assinado.
+**Entrega de engenharia local, sem publicação em produção.** Foram criados o monorepo, cinco migrations, aplicação Web/API/worker, conectores, testes e documentação. A matriz abaixo registra as 40 Stories; nenhuma linha representa homologação de produto, PR aprovado ou gate de infraestrutura assinado.
 
 Legenda: **Local** = comportamento implementado/verificado no alcance local; **Parcial** = há implementação e lacunas funcionais identificadas; **Externo** = artefatos preparados, execução depende do ambiente real. Gates R0–R3 continuam abertos até os requisitos globais do plano serem homologados.
 
@@ -12,7 +12,7 @@ Legenda: **Local** = comportamento implementado/verificado no alcance local; **P
 | S00 | ST-002 | Externo | Compose por APP_ENV, portas privadas, env template, Vault, containers sem root | Provisionar staging/prod reais, TLS, ACL de rede e segredos no Easypanel |
 | S00 | ST-003 | Externo | Scripts Restic/pg_dump/rclone; teste de restauração local de banco e mídia com checksum | Restaurar Supabase e Storage em staging e medir RPO/RTO remotos |
 | S00 | ST-004 | Parcial | CI lint/test/typecheck/audit/build; health, métricas e regras de alerta; rollback | Executar pipeline remota, CodeQL no GitHub, instalar monitor/alertas e demonstrar rollback |
-| S01 | ST-005 | Local | 79 tabelas, 4 migrations com checksum; replay pelo runner, FKs/RLS/immutabilidade testados | Conferir versão do Supabase real, grants, advisors e migration em staging |
+| S01 | ST-005 | Local | 79 tabelas originais + 2 de integração Audience, 5 migrations com checksum; replay pelo runner, FKs/RLS/immutabilidade testados | Conferir versão do Supabase real, grants, advisors e migration em staging |
 | S01 | ST-006 | Parcial | Login Supabase/TOTP, MFA em privilégios, validação de expiração/sessão e membership | Homologar GoTrue/MFA/SMTP real; eventos de sessão verificada já auditados; homologar trilha no Auth real |
 | S01 | ST-007 | Local | Convites Auth com validade/aceitação verificada, idempotência, sessões listadas e revogação por organização/MFA; UI e testes | Homologar SMTP/GoTrue real e ciclo completo de convite |
 | S01 | ST-008 | Local | RLS sob dim_app, tenant FKs, auditoria append-only, redaction, testes negativos API/DB/Storage | Revisão independente e validação no ambiente Self-Hosted |
@@ -61,6 +61,12 @@ Rodada adicional de 25/10: ESLint e TypeScript sem erros; suíte completa com 19
 - Browser: login com GoTrue/API de teste descartáveis em loopback, dashboard autenticado, criação pelo wizard e fluxo de autosave. Nenhuma credencial externa foi usada.
 - `docker compose config` validado. Build/execução de containers não realizado: daemon Docker local desligado.
 - npm audit: sem vulnerabilidades reportadas no lockfile na instalação; repetir no gate de release.
+
+## Integração com Audience Builder — 25/10/2026
+
+O DIM é executor; o Audience Builder gere persona, trajetória de autoridade e blog/editorial. Novas identidades usam a origem Audience. Foram implementados vínculo, sincronização autenticada, validação do contrato real de persona, hashes/aprovação, histórico imutável/RLS, interface somente leitura e invalidação de conteúdo/jobs. A suíte passou com 24 testes e a fixture foi aceita pelo validador real do checkout Audience.
+
+A quinta migration acrescenta `audience_bindings` e `audience_context_versions`, preservando as 79 tabelas originais. A integração remota completa **continua pendente**: export persistido no Audience, pedidos aprovados de execução, adaptadores faltantes e receipts/resultados de retorno. Detalhes em [audience-integration.md](audience-integration.md).
 
 ## Cobertura dos canais aprovada
 

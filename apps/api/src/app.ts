@@ -1,3 +1,4 @@
+import type { AudienceProvider } from "../../../packages/connectors/src/audience";
 import Fastify, { type FastifyRequest } from "fastify";
 import cors from "@fastify/cors";
 import helmet from "@fastify/helmet";
@@ -91,6 +92,7 @@ type Options = {
     token: string,
   ) => Promise<{ userId: string; aal: string; emailVerified?: boolean }>;
   invite?: Inviter;
+  audience?: AudienceProvider;
   vault?: Vault;
   storage?: PrivateStorage;
   scan?: (data: Buffer) => Promise<void>;
@@ -611,8 +613,14 @@ export async function buildApp(opts: Options) {
     }),
     async (db, a, r) => {
       const id = uuid.parse((r.params as any).id);
-      await resource(db, "influencers", id, a);
+      const identity = await resource(db, "influencers", id, a);
       authorize(a, "identity.write", { influencerId: id });
+      demand(
+        identity.persona_source !== "audience_builder",
+        "PROFILE_MANAGED_BY_AUDIENCE",
+        "Biografia, posicionamento e público são geridos no Audience Builder",
+        409,
+      );
       const data = r.body as any;
       demand(
         await one(

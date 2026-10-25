@@ -15,13 +15,33 @@ export async function contentVersion(
   id: string,
   input: unknown,
 ) {
-  const data = versionInput.strict().parse(input);
+  let data = versionInput.strict().parse(input);
   const content = await resource(db, "content_items", id, actor);
   authorize(actor, "editorial.write", { influencerId: content.influencer_id });
   await db.query(
     "SELECT id FROM custom_dim.content_items WHERE id=$1 FOR UPDATE",
     [id],
   );
+  const identity = await resource(
+    db,
+    "influencers",
+    content.influencer_id,
+    actor,
+  );
+  if (identity.persona_source === "audience_builder") {
+    const binding = await one(
+      db,
+      "SELECT current_context_id FROM custom_dim.audience_bindings WHERE influencer_id=$1 AND status='synced'",
+      [identity.id],
+    );
+    data = {
+      ...data,
+      body: {
+        ...data.body,
+        audience_context_id: binding?.current_context_id || null,
+      },
+    };
+  }
   for (const asset of data.asset_ids)
     await resource(db, "storage_objects", asset, actor);
   const previous = await one(
@@ -88,6 +108,18 @@ export async function verifyContent(db: DB, actor: Actor, versionId: string) {
     actor,
   );
   const flags = await rightsBlockers(db, actor, identity);
+  if (identity.persona_source === "audience_builder") {
+    const binding = await one(
+      db,
+      "SELECT current_context_id FROM custom_dim.audience_bindings WHERE influencer_id=$1",
+      [identity.id],
+    );
+    if (
+      !binding?.current_context_id ||
+      version.body.audience_context_id !== binding.current_context_id
+    )
+      flags.push("audience_context_changed");
+  }
   const assets = (
     await db.query(
       `SELECT a.*,l.valid_until FROM custom_dim.content_assets a LEFT JOIN custom_dim.identity_assets ia ON ia.storage_object_id=a.storage_object_id LEFT JOIN custom_dim.media_licenses l ON l.id=ia.license_id WHERE a.content_version_id=$1`,
@@ -222,6 +254,20 @@ export async function publicationGuard(db: DB, actor: Actor, job: any) {
     job.content_version_id,
     actor,
   );
+  if (identity.persona_source === "audience_builder") {
+    const binding = await one(
+      db,
+      "SELECT current_context_id FROM custom_dim.audience_bindings WHERE influencer_id=$1",
+      [identity.id],
+    );
+    demand(
+      binding?.current_context_id &&
+        version.body.audience_context_id === binding.current_context_id,
+      "AUDIENCE_CONTEXT_CHANGED",
+      "Crie e revise uma versão de conteúdo com o contexto atual do Audience",
+      409,
+    );
+  }
   const content = await resource(
     db,
     "content_items",

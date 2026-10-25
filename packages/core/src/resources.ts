@@ -425,6 +425,7 @@ export async function createResource(
     if (data[field]) await member(db, actor, data[field]);
   if (key === "influencers") {
     data.code = data.slug;
+    data.persona_source = "audience_builder";
   }
   if (key === "contents") data.created_by = actor.userId;
   if (data.ends_at && data.starts_at)

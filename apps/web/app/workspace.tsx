@@ -1,4 +1,5 @@
 "use client";
+import AudiencePanel from "./audience-panel";
 import ChannelCoverage from "./channel-coverage";
 import Link from "next/link";
 import { useEffect, useState, useCallback } from "react";
@@ -350,6 +351,7 @@ function Detail({
           </div>
           {kind === "influencers" && (
             <>
+              <AudiencePanel organization={organization} id={id} />
               <ChannelCoverage organization={organization} id={id} />
               <nav className="tabs">
                 {[
@@ -379,20 +381,24 @@ function Detail({
                     command(`/influencers/${id}/transition`, data)
                   }
                 />
-                <JsonCommand
-                  title="Nova versão da persona"
-                  initial={{
-                    public_bio: "",
-                    tone: {},
-                    traits: {},
-                    knowledge: {},
-                    boundaries: {},
-                    approval_status: "draft",
-                  }}
-                  submit={(data) =>
-                    command(`/influencers/${id}/personas`, data)
-                  }
-                />
+                {item.persona_source === "legacy_local" && (
+                  <>
+                    <JsonCommand
+                      title="Nova versão da persona"
+                      initial={{
+                        public_bio: "",
+                        tone: {},
+                        traits: {},
+                        knowledge: {},
+                        boundaries: {},
+                        approval_status: "draft",
+                      }}
+                      submit={(data) =>
+                        command(`/influencers/${id}/personas`, data)
+                      }
+                    />
+                  </>
+                )}
                 <JsonCommand
                   title="Atribuir editor"
                   initial={{ user_id: "", responsibility: "editor" }}

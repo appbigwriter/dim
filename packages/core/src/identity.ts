@@ -1,3 +1,4 @@
+import { audienceBlockers } from "./audience";
 import { z } from "zod";
 import {
   demand,
@@ -30,7 +31,7 @@ export async function rightsBlockers(
   platform?: string,
 ) {
   const values = [actor.organizationId, identity.id];
-  const blockers: string[] = [];
+  const blockers: string[] = await audienceBlockers(db, identity);
   if (!identity.owner_user_id) blockers.push("responsible_owner");
   else if (
     !(await one(
@@ -272,8 +273,14 @@ export async function persona(
   id: string,
   input: unknown,
 ) {
-  await resource(db, "influencers", id, actor);
+  const identity = await resource(db, "influencers", id, actor);
   authorize(actor, "governance.write", { influencerId: id });
+  demand(
+    identity.persona_source !== "audience_builder",
+    "PERSONA_MANAGED_BY_AUDIENCE",
+    "Crie, altere e aprove a persona no Audience Builder; sincronize a versão aprovada no DIM",
+    409,
+  );
   const data = z
     .object({
       public_bio: text,

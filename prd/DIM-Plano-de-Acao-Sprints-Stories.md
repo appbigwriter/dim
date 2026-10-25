@@ -441,3 +441,17 @@ Planejamento no primeiro dia da sprint; daily de 15 minutos; refinamento na meta
 Código implementado na raiz deste projeto em `apps/`, `packages/`, `supabase/`, `infra/`, `n8n/` e `tests/`. As 40 Stories foram rastreadas individualmente em [docs/implementation-status.md](../docs/implementation-status.md), com evidências, lacunas e dependências externas. Execute `npm run check` para validação local e consulte [README.md](../README.md) e [runbook](../docs/runbook.md) para configurar o ambiente.
 
 Os testes locais não encerram automaticamente os gates acima. Deploy, publicação oficial, restauração remota, PR revisado e homologação continuam condicionados às evidências e permissões reais do ambiente. As Stories parcialmente implementadas estão explicitamente identificadas na matriz; não foram marcadas como concluídas por haver apenas scaffolding ou configuração de exemplo.
+
+## Integração obrigatória Audience Builder → executor DIM — 25/10/2026
+
+O Audience Builder gere persona, trajetória de autoridade e gestão editorial do blog. O DIM executa as ações aprovadas e devolve resultados. Preservar origem canônica no Authority Engine, contexto por tenant/projeto/persona e governança por versão/hash. A implementação não pode duplicar a gestão da persona ou do blog.
+
+| Item | Aceite | Estado verificado |
+| --- | --- | --- |
+| ABDIM-001 — Contexto e vínculo por identidade | Pacote aprovado compatível com a origem, tenant/projeto, hashes, histórico, idempotência, persona somente leitura, invalidação de conteúdo e testes negativos | Implementado/testado localmente no DIM; contrato de export da origem ainda pendente |
+| ABDIM-002 — Export persistido no Audience | API oficial autenticada, readback real e contexto completo por tenant/projeto | Pendente de implementação na origem; a lista demonstrativa de projetos não satisfaz o aceite |
+| ABDIM-003 — Pedidos aprovados e execução DIM | Ação/canal/destino concretos, aprovação exata, contexto vigente, idempotência, guards e adaptador operacional para cada canal do escopo | Pendente do contrato/dispatcher transversal e dos adaptadores faltantes |
+| ABDIM-004 — Resultados de volta ao Audience | Receipt idempotente, IDs externos/evidências, custos, erros e métricas; `uncertain` sem reenvio cego | Pendente do contrato e receptor persistido na origem |
+| ABDIM-005 — Blog e homologação ponta a ponta | Audience gere editorial/blog; DIM executa ação aprovada via runtime oficial; testar mudança/revogação e retorno para todos os canais | Pendente de endpoints e homologação real |
+
+Especificação verificável: `docs/audience-integration.md`. Nenhum item pendente é considerado entregue pelo simples registro nesta tabela.

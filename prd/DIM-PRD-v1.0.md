@@ -10,6 +10,16 @@
 
 ---
 
+## Decisão arquitetural adicional — Audience Builder e execução DIM (25/10/2026)
+
+O DIM integra o Audience Builder em `F:\Projetos\_FBR\FBR Audience`. O usuário cria e gere a persona e toda a trajetória de construção de autoridade pelo Audience Builder, incluindo a criação e gestão editorial do blog. O contrato atual do Audience preserva a origem canônica/versionada da persona no Authority Engine.
+
+**O DIM é o executor das ações aprovadas dentro de todo o escopo multicanal.** Recebe contexto, versões, objetivos e aprovações; aplica direitos, escopos e capacidades; executa pelos adaptadores oficiais disponíveis; e devolve resultados, evidências, custos e métricas. Não deve criar uma segunda persona nem alterar por conta própria sua estratégia. A gestão editorial do blog fica no Audience; a execução de suas ações aprovadas integra o runtime oficial correspondente.
+
+Novas identidades DIM usam persona gerida pelo Audience; dados locais anteriores são legados e precisam de migração/vínculo explícitos. Sem contexto confirmado, a identidade não deve obter aceite operacional. A alteração de contexto exige revalidação das versões de conteúdo e cancela publicações pendentes que o utilizavam.
+
+O aceite integral inclui o ciclo Audience → DIM → canais → Audience para Blogs, Instagram, Facebook, X, WhatsApp, Telegram, E-mail, YouTube e CRM. Sincronizar persona/contexto isoladamente não conclui o ciclo. Contrato, implementação local e pendências: `docs/audience-integration.md`. Essa decisão prevalece sobre descrições anteriores que atribuíam autoria independente de persona ao DIM.
+
 ## 1. Visão do produto, objetivos e escopo
 
 ### 1.1. Problema

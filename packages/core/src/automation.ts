@@ -1,3 +1,4 @@
+import { audienceBlockers } from "./audience";
 import { randomUUID } from "node:crypto";
 import { demand } from "../../contracts/src/index";
 import { type Database, insert, one } from "../../db/src/index";
@@ -77,6 +78,14 @@ export async function executeAutomation(
       "IDENTITY_MISMATCH",
       "Conteúdo incompatível",
     );
+    const identity = await resource(
+      tx,
+      "influencers",
+      assignment.influencer_id,
+      actor,
+    );
+    const blockers = await audienceBlockers(tx, identity);
+    demand(!blockers.length, "AUDIENCE_CONTEXT_REQUIRED", blockers.join(", "));
     const persona = await one(
       tx,
       "SELECT * FROM custom_dim.influencer_personas WHERE influencer_id=$1 AND approval_status='approved' ORDER BY version DESC LIMIT 1",

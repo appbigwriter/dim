@@ -40,6 +40,11 @@ export async function operational(
       owner_user_id: admin,
     }),
   );
+  // Legacy fixtures isolate social transport/governance tests from Audience's separate contract suite.
+  await db.query(
+    "UPDATE custom_dim.influencers SET persona_source='legacy_local' WHERE id=$1",
+    [identity.id],
+  );
   const object = await insert(db, "storage_objects", {
     organization_id: org.id,
     bucket: "dim-private",

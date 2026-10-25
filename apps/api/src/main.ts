@@ -1,3 +1,4 @@
+import { audienceProvider } from "../../../packages/connectors/src/audience";
 import "dotenv/config";
 import { createClient } from "@supabase/supabase-js";
 import { decodeJwt } from "jose";
@@ -57,6 +58,9 @@ const app = await buildApp({
   db,
   logger: true,
   vault,
+  audience: vault
+    ? audienceProvider(vault, fetch, process.env.APP_ENV === "development")
+    : undefined,
   storage,
   scan,
   invite: process.env.SUPABASE_SERVICE_ROLE_KEY

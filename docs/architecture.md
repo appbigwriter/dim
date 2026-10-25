@@ -2,11 +2,17 @@
 
 Base: PRD v1.0, plano de Sprints e `prd/dim-dev-doc.md`, lidos em 24/10/2026.
 
+## Responsabilidade de produto — decisão de 25/10/2026
+
+O Audience Builder gere persona, trajetória de autoridade e gestão editorial do blog. O DIM executa ações aprovadas nos nove itens do escopo e devolve evidências/resultados/métricas. A origem canônica da persona continua rastreada ao Authority Engine conforme o contrato existente do Audience. Flux e Control Tower mantêm orquestração e provisionamento transversais. Contrato e estado real: [audience-integration.md](audience-integration.md).
+
+O consumidor DIM já vincula/sincroniza contexto aprovado e protege a persona gerida pela origem. A API persistida de export, a ingestão transversal de ações e o retorno ao Audience ainda não estão concluídos. Nenhum endpoint demonstrativo foi tratado como integração operacional.
+
 ## Compatibilidade de infraestrutura
 
 O dev-doc confirma `vps2`, projeto Easypanel `sistemas`, serviço `dim`, domínio `dim.fbr.news`, Supabase central `https://supabase-control-tower-api.fbr.news`, project ID `3a4d3421-7d76-421c-afe2-e981e12ef64b`. Não fornece acesso à VPS, rede, volumes, versões, SMTP, credenciais ou n8n URL. Nenhum serviço remoto foi alterado.
 
-O dev-doc descreve um template genérico com sete tabelas; o PRD e o SQL revisado especificam 79 tabelas de domínio. A implementação segue as 79 tabelas, preserva `custom_dim` e acrescenta `project_id`/`owner_id` à organização. Não transforma `entities/records` em uma segunda fonte de dados. O path `/09-codigo` citado pelo dev-doc diverge da raiz do monorepo: o build deve usar a raiz, e essa alteração exige validação no catálogo/Easypanel antes do deploy.
+O dev-doc descreve um template genérico com sete tabelas; o PRD e o SQL revisado especificam 79 tabelas de domínio. A implementação preserva as 79 tabelas originais e acrescenta duas tabelas de integração Audience; mantém `custom_dim` e acrescenta `project_id`/`owner_id` à organização. Não transforma `entities/records` em uma segunda fonte de dados. O path `/09-codigo` citado pelo dev-doc diverge da raiz do monorepo: o build deve usar a raiz, e essa alteração exige validação no catálogo/Easypanel antes do deploy.
 
 ## Fluxo
 

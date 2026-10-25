@@ -92,6 +92,10 @@ test("API enforces auth, MFA, tenant, strict inputs, optimistic concurrency and 
       payload: { public_name: "Lost update", row_version: 1 },
     });
     assert.equal(stale.statusCode, 409, stale.body);
+    await f.db.query(
+      "UPDATE custom_dim.influencers SET persona_source='legacy_local' WHERE id=$1",
+      [identity.id],
+    );
     const profile = {
       row_version: 2,
       biography_short: "Bio",
