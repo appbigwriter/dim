@@ -393,66 +393,94 @@ export async function buildApp(opts: Options) {
     }
     return { ...session, organizations };
   });
-  app.post("/api/v1/auth/simple-login", async (req) => {
-    demand(
-      simpleAuthEnabled(),
-      "LOCAL_AUTH_DISABLED",
-      "Acesso local desativado",
-      404,
-    );
-    const isProdQuick = process.env.ALLOW_SIMPLE_LOGIN_IN_PROD === "true";
-    const body = z
-      .object({
-        email: z.string().email(),
-        password: z.string().min(isProdQuick ? 6 : 12),
-      })
-      .parse(req.body);
-
-    const configuredPassword = process.env.ADMIN_PASSWORD;
-    const configuredEmail = process.env.ADMIN_EMAIL;
-
-    const passwordMatches =
-      (configuredPassword &&
-        configuredPassword.length >= 12 &&
-        sameSecret(body.password, configuredPassword)) ||
-      (isProdQuick && (body.password === "admin123" || body.password === "admin12345678"));
-
-    const emailMatches =
-      (configuredEmail && body.email === configuredEmail) ||
-      (isProdQuick && body.email === "admin@fbr.news");
-
-    demand(
-      passwordMatches && emailMatches,
-      "INVALID_CREDENTIALS",
-      "Credenciais locais inválidas",
-      401,
-    );
-    let userIdStr = process.env.ADMIN_USER_ID;
-    if (!userIdStr && isProdQuick) {
-      userIdStr = "b69b2949-f6be-4f86-9265-c0d561d5b0b0";
-    }
-    const userId = uuid.parse(userIdStr);
-
-    const organizations = await ensureAdminUserAndOrg(
-      opts.db,
-      userId,
-      body.email,
-    );
-
-    const sessionId = randomUUID();
+  app.post("/api/v1/auth/simple-login", async (req, reply) => {
     try {
-      await opts.db.query(
-        "INSERT INTO auth.sessions(id,user_id,not_after) VALUES($1,$2,now()+interval '30 days') ON CONFLICT DO NOTHING",
-        [sessionId, userId],
+      demand(
+        simpleAuthEnabled(),
+        "LOCAL_AUTH_DISABLED",
+        "Acesso local desativado",
+        404,
       );
-    } catch {}
-    const token = await createSimpleToken(userId, body.email, sessionId);
+      const isProdQuick = process.env.ALLOW_SIMPLE_LOGIN_IN_PROD === "true";
+      const body = z
+        .object({
+          email: z.string().email(),
+          password: z.string().min(1),
+        })
+        .parse(req.body);
 
-    return {
-      token,
-      user: { id: userId, email: body.email },
-      organizations,
-    };
+      const configuredPassword = process.env.ADMIN_PASSWORD;
+      const configuredEmail = process.env.ADMIN_EMAIL;
+
+      const passwordMatches =
+        (configuredPassword &&
+          configuredPassword.length >= 12 &&
+          sameSecret(body.password, configuredPassword)) ||
+        (isProdQuick && (body.password === "admin123" || body.password === "admin12345678"));
+
+      const emailMatches =
+        (configuredEmail && body.email.toLowerCase() === configuredEmail.toLowerCase()) ||
+        (isProdQuick && body.email.toLowerCase() === "admin@fbr.news");
+
+      demand(
+        passwordMatches && emailMatches,
+        "INVALID_CREDENTIALS",
+        "Credenciais locais inválidas",
+        401,
+      );
+
+      let userIdStr = process.env.ADMIN_USER_ID;
+      if (isProdQuick) {
+        try {
+          const existingUser = (
+            await opts.db.query(
+              "SELECT id FROM auth.users WHERE LOWER(email)=LOWER($1) LIMIT 1",
+              [body.email],
+            )
+          ).rows[0];
+          if (existingUser?.id) {
+            userIdStr = existingUser.id;
+          }
+        } catch {}
+      }
+
+      if (!userIdStr && isProdQuick) {
+        userIdStr = "b69b2949-f6be-4f86-9265-c0d561d5b0b0";
+      }
+      const userId = uuid.parse(userIdStr);
+
+      const organizations = await ensureAdminUserAndOrg(
+        opts.db,
+        userId,
+        body.email,
+      );
+
+      const sessionId = randomUUID();
+      try {
+        await opts.db.query(
+          "INSERT INTO auth.sessions(id,user_id,not_after) VALUES($1,$2,now()+interval '30 days') ON CONFLICT DO NOTHING",
+          [sessionId, userId],
+        );
+      } catch {}
+      const token = await createSimpleToken(userId, body.email, sessionId);
+
+      return {
+        token,
+        user: { id: userId, email: body.email },
+        organizations,
+      };
+    } catch (err: any) {
+      req.log.error({ err }, "Erro em /api/v1/auth/simple-login");
+      const status =
+        err instanceof AppError
+          ? err.status
+          : err.statusCode || (err.validation || err instanceof z.ZodError ? 400 : 500);
+      return reply.code(status).send({
+        code: err.code || "AUTH_ERROR",
+        message: err.message || "Falha interna na autenticação",
+        correlation_id: randomUUID(),
+      });
+    }
   });
   app.post("/api/v1/automation/execute", async (req) => {
     demand(

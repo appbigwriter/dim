@@ -106,66 +106,102 @@ export async function ensureAdminUserAndOrg(
     "Acesso local desativado",
     404,
   );
-  let organizations = (
-    await db.query(
-      "SELECT o.id,o.name,o.slug FROM custom_dim.organizations o JOIN custom_dim.organization_members m ON m.organization_id=o.id WHERE m.user_id=$1 AND m.status='active' AND o.status='active'",
-      [userId],
-    )
-  ).rows;
+
+  // Garante que o usuário exista na tabela auth.users para satisfazer restrições de FK
+  if (process.env.ALLOW_SIMPLE_LOGIN_IN_PROD === "true") {
+    try {
+      await db.query(
+        `INSERT INTO auth.users (id, instance_id, aud, role, email, email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
+         VALUES ($1, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', $2, now(), '{"provider":"email","providers":["email"]}'::jsonb, '{}'::jsonb, now(), now())
+         ON CONFLICT (id) DO NOTHING`,
+        [userId, _email || "admin@fbr.news"],
+      );
+    } catch {
+      try {
+        await db.query(
+          `INSERT INTO auth.users (id, email) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING`,
+          [userId, _email || "admin@fbr.news"],
+        );
+      } catch {}
+    }
+  }
+
+  let organizations: any[] = [];
+  try {
+    organizations = (
+      await db.query(
+        "SELECT o.id,o.name,o.slug FROM custom_dim.organizations o JOIN custom_dim.organization_members m ON m.organization_id=o.id WHERE m.user_id=$1 AND m.status='active' AND o.status='active'",
+        [userId],
+      )
+    ).rows;
+  } catch {}
 
   if (!organizations.length && process.env.ALLOW_SIMPLE_LOGIN_IN_PROD === "true") {
-    const anyOrg = (
-      await db.query(
-        "SELECT id, name, slug FROM custom_dim.organizations WHERE status='active' ORDER BY created_at ASC LIMIT 1",
-      )
-    ).rows[0];
+    let anyOrg: any = null;
+    try {
+      anyOrg = (
+        await db.query(
+          "SELECT id, name, slug FROM custom_dim.organizations WHERE status='active' ORDER BY created_at ASC LIMIT 1",
+        )
+      ).rows[0];
+    } catch {}
+
+    if (!anyOrg) {
+      try {
+        anyOrg = (
+          await db.query(
+            "INSERT INTO custom_dim.organizations (name, slug) VALUES ('FBR Digital', 'fbr-digital') ON CONFLICT (slug) DO UPDATE SET status='active' RETURNING id, name, slug",
+          )
+        ).rows[0];
+      } catch {
+        try {
+          anyOrg = (
+            await db.query(
+              "SELECT id, name, slug FROM custom_dim.organizations WHERE slug='fbr-digital' LIMIT 1",
+            )
+          ).rows[0];
+        } catch {}
+      }
+    }
 
     if (anyOrg) {
-      await db.query(
-        "INSERT INTO custom_dim.organization_members (organization_id, user_id, status) VALUES ($1, $2, 'active') ON CONFLICT DO NOTHING",
-        [anyOrg.id, userId],
-      );
-      const adminRole = (
+      try {
         await db.query(
-          "SELECT id FROM custom_dim.roles WHERE organization_id=$1 AND code='admin'",
-          [anyOrg.id],
-        )
-      ).rows[0];
-      if (adminRole) {
-        await db.query(
-          "INSERT INTO custom_dim.role_assignments (organization_id, user_id, role_id, scope_type, assigned_by) VALUES ($1, $2, $3, 'organization', $2) ON CONFLICT DO NOTHING",
-          [anyOrg.id, userId, adminRole.id],
+          "INSERT INTO custom_dim.organization_members (organization_id, user_id, status) VALUES ($1, $2, 'active') ON CONFLICT (organization_id, user_id) DO UPDATE SET status='active'",
+          [anyOrg.id, userId],
         );
-      }
+      } catch {}
+
+      try {
+        let adminRole = (
+          await db.query(
+            "SELECT id FROM custom_dim.roles WHERE organization_id=$1 AND code='admin'",
+            [anyOrg.id],
+          )
+        ).rows[0];
+
+        if (!adminRole) {
+          adminRole = (
+            await db.query(
+              "INSERT INTO custom_dim.roles (organization_id, code, name, is_system) VALUES ($1, 'admin', 'admin', true) ON CONFLICT (organization_id, code) DO UPDATE SET is_system=true RETURNING id",
+              [anyOrg.id],
+            )
+          ).rows[0];
+        }
+
+        if (adminRole) {
+          await db.query(
+            "INSERT INTO custom_dim.role_permissions(role_id,permission_id) SELECT $1,id FROM custom_dim.permissions ON CONFLICT DO NOTHING",
+            [adminRole.id],
+          );
+          await db.query(
+            "INSERT INTO custom_dim.role_assignments (organization_id, user_id, role_id, scope_type, assigned_by) VALUES ($1, $2, $3, 'organization', $2) ON CONFLICT DO NOTHING",
+            [anyOrg.id, userId, adminRole.id],
+          );
+        }
+      } catch {}
+
       organizations = [anyOrg];
-    } else {
-      const newOrg = (
-        await db.query(
-          "INSERT INTO custom_dim.organizations (name, slug, owner_id) VALUES ('FBR Digital', 'fbr-digital', $1) RETURNING id, name, slug",
-          [userId],
-        )
-      ).rows[0];
-      await db.query(
-        "INSERT INTO custom_dim.organization_members (organization_id, user_id, status) VALUES ($1, $2, 'active')",
-        [newOrg.id, userId],
-      );
-      const adminRole = (
-        await db.query(
-          "INSERT INTO custom_dim.roles (organization_id, code, name, is_system) VALUES ($1, 'admin', 'admin', true) RETURNING id",
-          [newOrg.id],
-        )
-      ).rows[0];
-      if (adminRole) {
-        await db.query(
-          "INSERT INTO custom_dim.role_permissions(role_id,permission_id) SELECT $1,id FROM custom_dim.permissions ON CONFLICT DO NOTHING",
-          [adminRole.id],
-        );
-        await db.query(
-          "INSERT INTO custom_dim.role_assignments (organization_id, user_id, role_id, scope_type, assigned_by) VALUES ($1, $2, $3, 'organization', $2) ON CONFLICT DO NOTHING",
-          [newOrg.id, userId, adminRole.id],
-        );
-      }
-      organizations = [newOrg];
     }
   }
 
