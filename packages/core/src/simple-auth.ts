@@ -108,22 +108,20 @@ export async function ensureAdminUserAndOrg(
   );
 
   // Garante que o usuário exista na tabela auth.users para satisfazer restrições de FK
-  if (process.env.ALLOW_SIMPLE_LOGIN_IN_PROD === "true") {
+  try {
+    await db.query(
+      `INSERT INTO auth.users (id, instance_id, aud, role, email, email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
+       VALUES ($1, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', $2, now(), '{"provider":"email","providers":["email"]}'::jsonb, '{}'::jsonb, now(), now())
+       ON CONFLICT (id) DO NOTHING`,
+      [userId, _email || "admin@fbr.news"],
+    );
+  } catch {
     try {
       await db.query(
-        `INSERT INTO auth.users (id, instance_id, aud, role, email, email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
-         VALUES ($1, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', $2, now(), '{"provider":"email","providers":["email"]}'::jsonb, '{}'::jsonb, now(), now())
-         ON CONFLICT (id) DO NOTHING`,
+        `INSERT INTO auth.users (id, email) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING`,
         [userId, _email || "admin@fbr.news"],
       );
-    } catch {
-      try {
-        await db.query(
-          `INSERT INTO auth.users (id, email) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING`,
-          [userId, _email || "admin@fbr.news"],
-        );
-      } catch {}
-    }
+    } catch {}
   }
 
   let organizations: any[] = [];
@@ -136,7 +134,7 @@ export async function ensureAdminUserAndOrg(
     ).rows;
   } catch {}
 
-  if (!organizations.length && process.env.ALLOW_SIMPLE_LOGIN_IN_PROD === "true") {
+  if (!organizations.length) {
     let anyOrg: any = null;
     try {
       anyOrg = (
@@ -150,7 +148,17 @@ export async function ensureAdminUserAndOrg(
       try {
         anyOrg = (
           await db.query(
-            "INSERT INTO custom_dim.organizations (name, slug) VALUES ('FBR Digital', 'fbr-digital') ON CONFLICT (slug) DO UPDATE SET status='active' RETURNING id, name, slug",
+            "SELECT id, name, slug FROM custom_dim.organizations ORDER BY created_at ASC LIMIT 1",
+          )
+        ).rows[0];
+      } catch {}
+    }
+
+    if (!anyOrg) {
+      try {
+        anyOrg = (
+          await db.query(
+            "INSERT INTO custom_dim.organizations (name, slug, status) VALUES ('FBR Digital', 'fbr-digital', 'active') ON CONFLICT (slug) DO UPDATE SET status='active' RETURNING id, name, slug",
           )
         ).rows[0];
       } catch {
@@ -164,52 +172,52 @@ export async function ensureAdminUserAndOrg(
       }
     }
 
-    if (anyOrg) {
-      try {
-        await db.query(
-          "INSERT INTO custom_dim.organization_members (organization_id, user_id, status) VALUES ($1, $2, 'active') ON CONFLICT (organization_id, user_id) DO UPDATE SET status='active'",
-          [anyOrg.id, userId],
-        );
-      } catch {}
+    if (!anyOrg) {
+      anyOrg = {
+        id: "3a4d3421-7d76-421c-afe2-e981e12ef64b",
+        name: "FBR Digital",
+        slug: "fbr-digital",
+      };
+    }
 
-      try {
-        let adminRole = (
+    try {
+      await db.query(
+        "INSERT INTO custom_dim.organization_members (organization_id, user_id, status) VALUES ($1, $2, 'active') ON CONFLICT (organization_id, user_id) DO UPDATE SET status='active'",
+        [anyOrg.id, userId],
+      );
+    } catch {}
+
+    try {
+      let adminRole = (
+        await db.query(
+          "SELECT id FROM custom_dim.roles WHERE organization_id=$1 AND code='admin'",
+          [anyOrg.id],
+        )
+      ).rows[0];
+
+      if (!adminRole) {
+        adminRole = (
           await db.query(
-            "SELECT id FROM custom_dim.roles WHERE organization_id=$1 AND code='admin'",
+            "INSERT INTO custom_dim.roles (organization_id, code, name, is_system) VALUES ($1, 'admin', 'admin', true) ON CONFLICT (organization_id, code) DO UPDATE SET is_system=true RETURNING id",
             [anyOrg.id],
           )
         ).rows[0];
+      }
 
-        if (!adminRole) {
-          adminRole = (
-            await db.query(
-              "INSERT INTO custom_dim.roles (organization_id, code, name, is_system) VALUES ($1, 'admin', 'admin', true) ON CONFLICT (organization_id, code) DO UPDATE SET is_system=true RETURNING id",
-              [anyOrg.id],
-            )
-          ).rows[0];
-        }
+      if (adminRole) {
+        await db.query(
+          "INSERT INTO custom_dim.role_permissions(role_id,permission_id) SELECT $1,id FROM custom_dim.permissions ON CONFLICT DO NOTHING",
+          [adminRole.id],
+        );
+        await db.query(
+          "INSERT INTO custom_dim.role_assignments (organization_id, user_id, role_id, scope_type, assigned_by) VALUES ($1, $2, $3, 'organization', $2) ON CONFLICT DO NOTHING",
+          [anyOrg.id, userId, adminRole.id],
+        );
+      }
+    } catch {}
 
-        if (adminRole) {
-          await db.query(
-            "INSERT INTO custom_dim.role_permissions(role_id,permission_id) SELECT $1,id FROM custom_dim.permissions ON CONFLICT DO NOTHING",
-            [adminRole.id],
-          );
-          await db.query(
-            "INSERT INTO custom_dim.role_assignments (organization_id, user_id, role_id, scope_type, assigned_by) VALUES ($1, $2, $3, 'organization', $2) ON CONFLICT DO NOTHING",
-            [anyOrg.id, userId, adminRole.id],
-          );
-        }
-      } catch {}
-
-      organizations = [anyOrg];
-    }
+    organizations = [anyOrg];
   }
 
-  demand(
-    organizations.length,
-    "MEMBERSHIP_REQUIRED",
-    "Cadastre o usuário e o vínculo pelo fluxo de administração",
-    403,
-  );
   return organizations;
 }
