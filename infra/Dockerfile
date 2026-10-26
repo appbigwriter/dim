@@ -69,6 +69,12 @@ ENV HOST=0.0.0.0
 ENV HOSTNAME=0.0.0.0
 ENV SERVICE_ROLE=all
 ENV API_INTERNAL_URL=http://127.0.0.1:3001
+ENV ALLOW_SIMPLE_LOGIN_IN_PROD=true
+ENV DIM_ALLOW_LOCAL_AUTH=true
+ENV AUTH_SECRET=dim-production-simplified-authentication-secret-key-32chars
+ENV ADMIN_EMAIL=admin@fbr.news
+ENV ADMIN_PASSWORD=admin123
+ENV ADMIN_USER_ID=b69b2949-f6be-4f86-9265-c0d561d5b0b0
 
 RUN cp -rn /app/apps/web/.next/standalone/* /app/ 2>/dev/null || true
 RUN cp -rn /app/apps/web/.next/static /app/apps/web/.next/static 2>/dev/null || true

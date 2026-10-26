@@ -131,7 +131,11 @@ function Login({ onSession }: { onSession: () => void }) {
     if (location.pathname === "/login") location.assign("/dashboard");
   }
 
-  async function handleLogin(targetEmail?: string, targetPassword?: string) {
+  async function handleLogin(
+    targetEmail?: string,
+    targetPassword?: string,
+    isQuickLogin = false,
+  ) {
     setBusy(true);
     setError("");
     const em = (targetEmail || email).trim();
@@ -161,6 +165,14 @@ function Login({ onSession }: { onSession: () => void }) {
         throw new Error(
           "A API interna ainda está inicializando na VPS. Aguarde alguns instantes e tente novamente.",
         );
+      } else if (res && res.status === 404 && isQuickLogin) {
+        throw new Error(
+          "O serviço de autenticação simples não está ativo no container. Faça o redeploy da imagem mais recente na VPS.",
+        );
+      }
+
+      if (isQuickLogin) {
+        throw new Error("Não foi possível autenticar via Acesso Rápido.");
       }
 
       const client = authClient();
@@ -237,6 +249,29 @@ function Login({ onSession }: { onSession: () => void }) {
         <h2>Bem-vindo ao DIM.</h2>
         <p>Entre com sua conta corporativa para continuar.</p>
         {error && <ErrorBanner error={error} />}
+
+        <div className="quick-access-box">
+          <button
+            type="button"
+            className="quick-access-btn"
+            disabled={busy}
+            onClick={() => {
+              setEmail("admin@fbr.news");
+              setPassword("admin123");
+              void handleLogin("admin@fbr.news", "admin123", true);
+            }}
+          >
+            {busy ? "Acessando espaço…" : "⚡ Acesso Rápido (Administrador)"}
+          </button>
+          <span className="quick-access-hint">
+            Login direto com a conta pré-configurada <code>admin@fbr.news</code>
+          </span>
+        </div>
+
+        <div className="login-divider">
+          <span>ou entre com credenciais</span>
+        </div>
+
         <form onSubmit={submit}>
           {!factor ? (
             <>
