@@ -20,6 +20,7 @@ import {
   observeAudienceExecutions,
   pollAudienceActions,
   scheduleAudienceExecution,
+  enrichAudienceReceipts,
 } from "../packages/core/src/audience-execution";
 import { scoped } from "../packages/core/src/security";
 import { createResource } from "../packages/core/src/resources";
@@ -412,6 +413,40 @@ test("approved source action becomes one reviewable version, requires independen
         0,
       );
     });
+    const published = await one(
+      f.db,
+      "SELECT id FROM custom_dim.published_posts WHERE job_id=$1",
+      [job.id],
+    );
+    const observedAt = new Date().toISOString();
+    for (const [metric, value] of [
+      ["views", "42"],
+      ["comments", "3"],
+    ])
+      await insert(f.db, "publication_metrics", {
+        organization_id: f.org.id,
+        published_post_id: published.id,
+        metric_code: metric,
+        metric_value: value,
+        observed_at: observedAt,
+        provenance: "test_provider_confirmed",
+      });
+    await f.db.query(
+      "UPDATE custom_dim.published_posts SET metrics_status='available',external_url='https://example.org/post' WHERE id=$1",
+      [published.id],
+    );
+    assert.equal((await enrichAudienceReceipts(f.db)).enriched, 1);
+    const enriched = await one(
+      f.db,
+      "SELECT receipt FROM custom_dim.audience_execution_receipts WHERE execution_id=$1 ORDER BY sequence_no DESC LIMIT 1",
+      [imported.execution_id],
+    );
+    assert.deepEqual(enriched.receipt.metrics, { comments: 3, views: 42 });
+    assert.equal(enriched.receipt.metricsObservedAt, observedAt);
+    assert.deepEqual(enriched.receipt.evidenceUrls, [
+      "https://example.org/post",
+    ]);
+    assert.equal((await enrichAudienceReceipts(f.db)).enriched, 0);
     const changed = {
       ...action,
       content: { ...action.content, text: "another text" },

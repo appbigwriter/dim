@@ -11,6 +11,7 @@ import { audit, authorize, event, hash, resource } from "./security";
 import { rightsBlockers } from "./identity";
 import { validateAudienceAction } from "../../contracts/src/audience-actions";
 import { channelCapabilityCode } from "../../connectors/src/channels";
+import { factualFlags } from "./factual";
 export async function contentVersion(
   db: DB,
   actor: Actor,
@@ -136,6 +137,8 @@ export async function verifyContent(db: DB, actor: Actor, versionId: string) {
     actor,
   );
   const flags = await rightsBlockers(db, actor, identity);
+  if (sourceExecution?.action.kind !== "crm_update")
+    flags.push(...(await factualFlags(db, actor, version, identity)));
   if (identity.persona_source === "audience_builder") {
     const binding = await one(
       db,
@@ -158,8 +161,15 @@ export async function verifyContent(db: DB, actor: Actor, versionId: string) {
     assets.some((a) => !a.valid_until || new Date(a.valid_until) <= new Date())
   )
     flags.push("unlicensed_asset");
-  if (!version.body.source_urls?.length) flags.push("sources_required");
-  if (identity.type !== "human") {
+  if (
+    (!sourceExecution || sourceExecution.action.kind === "publication") &&
+    !version.body.source_urls?.length
+  )
+    flags.push("sources_required");
+  if (
+    identity.type !== "human" &&
+    sourceExecution?.action.kind !== "crm_update"
+  ) {
     const disclosures = (
       await db.query(
         "SELECT disclosure_text FROM custom_dim.identity_disclosures WHERE influencer_id=$1 AND enabled=true AND disclosure_type='synthetic'",
@@ -306,6 +316,12 @@ export async function publicationGuard(db: DB, actor: Actor, job: any) {
     db,
     "SELECT e.*,b.execution_enabled,b.executor_user_id FROM custom_dim.audience_execution_requests e JOIN custom_dim.audience_bindings b ON b.id=e.binding_id WHERE e.content_id=$1",
     [content.id],
+  );
+  demand(
+    !sourceAction || sourceAction.action.kind === "publication",
+    "AUDIENCE_ACTION_KIND",
+    "Ação de conversa ou CRM deve usar o executor operacional aprovado",
+    409,
   );
   if (sourceAction?.automatic) {
     demand(
@@ -574,6 +590,11 @@ export async function operation(
   payload: any,
   key: string,
 ) {
+  payload = {
+    ...payload,
+    requested_by: actor.userId,
+    requested_aal: actor.aal,
+  };
   demand(
     key.length >= 8,
     "IDEMPOTENCY_REQUIRED",

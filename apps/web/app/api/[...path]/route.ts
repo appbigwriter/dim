@@ -16,6 +16,10 @@ async function proxy(
     "content-type",
     "x-organization-id",
     "idempotency-key",
+    "last-event-id",
+    "svix-id",
+    "svix-timestamp",
+    "svix-signature",
     "x-telegram-bot-api-secret-token",
     "x-hub-signature-256",
   ])
@@ -51,14 +55,29 @@ async function proxy(
       }
       body = bytes.buffer;
     }
-    const response = await fetch(url, {
-      method: request.method,
-      headers,
-      body,
-      cache: "no-store",
-      redirect: "manual",
-      signal: AbortSignal.timeout(60000),
-    });
+    let response: globalThis.Response;
+    try {
+      response = await fetch(url, {
+        method: request.method,
+        headers,
+        body,
+        cache: "no-store",
+        redirect: "manual",
+        signal: AbortSignal.timeout(60000),
+      });
+    } catch {
+      // Retry de 800ms caso a API Fastify esteja inicializando
+      await new Promise((r) => setTimeout(r, 800));
+      response = await fetch(url, {
+        method: request.method,
+        headers,
+        body,
+        cache: "no-store",
+        redirect: "manual",
+        signal: AbortSignal.timeout(60000),
+      });
+    }
+
     return new Response(response.body, {
       status: response.status,
       headers: {
@@ -68,11 +87,12 @@ async function proxy(
         "X-Correlation-Id": response.headers.get("x-correlation-id") || "",
       },
     });
-  } catch {
+  } catch (err: any) {
+    console.error("[Next Proxy Error] Falha de comunicação com a API interna:", url.toString(), err.message);
     return Response.json(
       {
         code: "API_UNAVAILABLE",
-        message: "Conexão com a API indisponível",
+        message: `Conexão com a API indisponível em ${url.origin}. Verifique se a API está em execução.`,
         correlation_id: crypto.randomUUID(),
       },
       { status: 503 },

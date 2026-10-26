@@ -4,7 +4,7 @@ Implementação local do PRD e do plano S00–S09 em `prd/`. Monorepo TypeScript
 
 **Estado de entrega:** aplicação compilável e fluxos principais verificados localmente. Homologação, infraestrutura remota e integrações reais permanecem nos gates descritos em [docs/implementation-status.md](docs/implementation-status.md). A existência de código não representa aprovação dos gates de produção.
 
-Audience Builder gere persona/autoridade/blog; DIM executa as ações aprovadas com revisão e direitos locais. A rodada atual acrescenta execução contínua separada, receipts duráveis, WordPress via Audience, Facebook/Instagram/YouTube, respostas Resend, Inbox/privacidade e comparação de mídia. Configuração e limites por canal: [integração Audience](docs/audience-integration.md), [cobertura dos nove canais](docs/channel-coverage.md).
+Audience Builder gere persona/autoridade/blog; DIM executa publicação, mensagens e CRM aprovados com revisão e direitos locais. A implementação inclui contexto automático da origem, receipts enriquecidos, OAuth/refresh, métricas dos canais, recebimento Resend, pesquisa/triagem restrita, verificação factual, realtime/SLA e retenção revisada. Configuração e limites: [integração Audience](docs/audience-integration.md), [nove canais](docs/channel-coverage.md), [matriz das 40 Stories](docs/implementation-status.md).
 
 ## Preparar o ambiente
 
@@ -50,9 +50,9 @@ Os testes de banco usam PostgreSQL WASM (PGlite) com fixtures locais de `auth.us
 | `packages/core` | Regras de identidade, direitos, aprovação, escopo, consentimento e custos |
 | `packages/contracts` | Validação e contratos TypeScript/Zod |
 | `packages/db` | Conexão, migrations com checksum, catálogo e bootstrap |
-| `packages/connectors` | Vault KV v2, OAuth X PKCE, Telegram, WhatsApp e Storage/ClamAV |
+| `packages/connectors` | Vault KV v2, OAuth multicanal, adaptadores oficiais, métricas, fontes e Storage/ClamAV |
 | `packages/ui` | Componentes compartilhados de estado, erro e métricas |
-| `supabase/migrations` | Fonte versionada das três migrations; cópia idêntica em `packages/db/migrations` |
+| `supabase/migrations` | Fonte versionada das sete migrations; cópia idêntica em `packages/db/migrations` |
 | `n8n/workflows` | 12 workflows importáveis e desativados; configuração descrita no runbook |
 | `infra` | Containers, rede privada, inventário, backup, restore e alertas |
 | `tests` | Casos de API/domínio/segurança/integração e recuperação |

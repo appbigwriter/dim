@@ -1,23 +1,25 @@
 # Cobertura dos nove canais
 
-Verificação local em 25/10/2026. O escopo se aplica às identidades humanas, virtuais e híbridas. Catálogo, adaptador, conta autorizada e homologação são estados distintos. Nenhuma identidade recebe contas ou credenciais fictícias.
+Atualizado em 26/10/2026. Os canais se aplicam às identidades humanas, virtuais e híbridas. Cada conta exige titularidade legítima, autorização própria e capacidade atual verificada. Não há geração de contas ou credenciais fictícias.
 
-| Canal | Implementado localmente | Limites e aceite externo |
+| Canal | Fluxos implementados | Configuração/homologação externa |
 | --- | --- | --- |
-| Blogs | Contexto/ações Audience; gateway DIM; transporte WordPress no Audience com health e intent durável antes do envio | Configurar blog ativo/readback e credenciais; provisionamento e outros CMS exigem adapters |
-| Instagram | Graph via Facebook Login, inspeção de token/scopes/Página/conta profissional; JPEG privado e publicação de container | OAuth guiado/refresh, outros formatos, webhooks/métricas e homologação pendentes |
-| Facebook | Inspeção de token/scopes/titularidade da Página e publicação de texto | OAuth guiado/refresh, mídia, webhooks/métricas e homologação pendentes |
-| X | OAuth PKCE, texto, health, métricas públicas e falhas incertas | Refresh, planos/formatos adicionais e homologação real |
-| WhatsApp | Cloud API, assinatura, Inbox, opt-in/janela, templates BODY, header texto/mídia oficial e botões URL/quick reply | Business/Graph aprovados e testes reais; componentes avançados/named são bloqueados |
-| Telegram | Bot API, texto, health, webhook, Inbox e resposta | Mídia/moderação adicionais e homologação |
-| E-mail | Resend: domínio/remetente verificados, fila durável, destinatário verificado no servidor, consentimento e resposta | DNS/contas, confirmação de destinatário, recebimento e delivery/bounce pendentes; sem broadcast arbitrário |
-| YouTube | Scopes/canal, MP4 privado, upload resumable, título e declarações de público/privacidade no hash aprovado | OAuth guiado/refresh, processamento posterior, métricas/quotas e homologação |
-| CRM interno | Contatos/consentimentos, vínculo, Inbox, notas/handoff, filtros/paginação, SLA idempotente, export e apagamento operacional parcial com revisão independente | Agendamento autenticado de SLA, realtime, retenção externa/Storage/backups e homologação jurídica/operacional |
+| Blogs | Audience gere projeto/persona/estratégia/blog, provisionamento autenticado com intent/autoria, contexto automático e readback WordPress; DIM publica artigo aprovado; métricas com origem | CMS/DNS/credenciais, domínio e pacote Authority aprovados |
+| Instagram | OAuth guiado Meta, Página/conta profissional, seleção do titular, renovação do grant, health, JPEG privado/container e métricas oficiais | App, permissões, versão Graph e contas profissionais |
+| Facebook | OAuth guiado Meta, titularidade/tarefas da Página, renovação, publicação de texto e métricas | App/Página e permissões oficiais |
+| X | OAuth PKCE, refresh com rotação, texto, health e métricas públicas | App, scopes, plano e quotas |
+| WhatsApp | Cloud API, webhook assinado, Inbox, opt-in/janela, templates BODY/HEADER/mídia/botões, parâmetros posicionais e nomeados, logs e IDs | Business/Graph, templates e número aprovados |
+| Telegram | Bot API, webhook autenticado, texto/canal, Inbox e resposta oficial | Bot/canal/titular e permissões |
+| E-mail | Resend, remetente/domínio verificados, Inbox, destinatário no Vault, revisão documental explícita de titularidade, consentimento, recebimento/readback e fatos de entrega/bounce | DNS/domínio, assinatura Svix e comprovação de endereço; não há broadcast arbitrário |
+| YouTube | OAuth/PKCE Google, seleção do canal, refresh, upload MP4 resumable, declarações de público/privacidade, health e métricas | App revisado, scopes/canal, quotas e processamento oficial |
+| CRM | Contatos/vínculos/consentimentos, mensagens, notas/handoff, SLA automático, SSE, export e erasure revisado de dados/Storage/provedor/backup | Política jurídica e destinos reais de retenção |
 
-A ficha e `GET /api/v1/influencers/:id/channels` mostram os nove canais, contas visíveis e capacidade mínima verificada/fresca. Registro conectado sem capacidade comprovada permanece bloqueado. A API não presume homologação.
+O Audience emite ações `publication`, `message` e `crm_update`. O DIM importa a versão/hash/contexto, exige revisão local independente e executa o destino exato. Uma ação de conversa não pode ser desviada para o publicador de canal. O recibo retorna erro, ID/evidência, métrica com proveniência/frescor e custo atribuível quando disponíveis.
 
-O worker publica texto em X/Telegram/Facebook, JPEG em Instagram, MP4 em YouTube e artigos via Audience/WordPress. Respostas WhatsApp/Telegram/e-mail usam Inbox e suas guardas. O contrato inicial de ação Audience é de publicação: ações de conversa/CRM, broadcasts e operações adicionais precisam de contratos específicos.
+A ficha e `GET /api/v1/influencers/:id/channels` mostram contas visíveis e capacidades mínimas verificadas. A conexão guiada e o botão de health ficam na ficha da conta; segredos permanecem no servidor. Revogação concorrente e resultado incerto bloqueiam repetição automática.
 
-MP4 até 100 MiB e PDF/PNG/JPEG/WebP até 5 MiB exigem AV, MIME real, checksum, identidade e licença. Configurar limites correspondentes no proxy, Storage e ClamAV. Público/não listado no YouTube exige autorização no cofre além da revisão. Container Instagram sem confirmação fica incerto.
+Formatos mínimos entregues: texto X/Telegram/Facebook, JPEG Instagram, MP4 YouTube e artigo WordPress; mensagens WhatsApp/Telegram/e-mail e patch CRM aprovado. MP4 até 100 MiB e PDF/PNG/JPEG/WebP até 5 MiB exigem AV/MIME/checksum/identidade/licença. Formatos adicionais são extensões desses adaptadores. Nenhum teste local prova aprovação de app, criação da conta pelo titular ou publicação real.
 
-Detalhes: [conectores](connectors.md), [e-mail](email-integration.md), [Audience](audience-integration.md), [Inbox e privacidade](inbox-operations.md).
+Métricas não disponíveis na API, como views de blog WordPress sem plugin/fonte real e estatísticas de post Telegram, ficam desconhecidas. Confirmar um evento técnico de e-mail não prova leitura humana.
+
+Detalhes: [OAuth](oauth-onboarding.md), [métricas](additional-channel-metrics.md), [e-mail](email-integration.md), [Audience](audience-integration.md), [Inbox](inbox-operations.md).

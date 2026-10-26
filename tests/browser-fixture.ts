@@ -8,17 +8,30 @@ import { AppError } from "../packages/contracts/src/index";
 import { loadActor } from "../packages/core/src/access";
 import { createResource } from "../packages/core/src/resources";
 import { scoped } from "../packages/core/src/security";
+import { one, insert } from "../packages/db/src/index";
 if (process.env.DIM_BROWSER_FIXTURE !== "1")
   throw new Error("Use DIM_BROWSER_FIXTURE=1 only for isolated browser tests");
 const f = await fixture();
 await scoped(f.db, f.actor, async (tx) => {
-  await createResource(tx, f.actor, "influencers", {
+  const identity = await createResource(tx, f.actor, "influencers", {
     public_name: "Aurora · exemplo local",
     internal_name: "Aurora",
     slug: "aurora-fixture",
     type: "virtual",
     niche: "Cultura",
     owner_user_id: f.admin,
+  });
+  const platform = await one(
+    tx,
+    "SELECT id FROM custom_dim.platforms WHERE code='youtube'",
+  );
+  await insert(tx, "social_accounts", {
+    organization_id: f.org.id,
+    influencer_id: identity.id,
+    platform_id: platform.id,
+    account_type: "channel",
+    handle: "Canal local de teste",
+    external_id: "UCaaaaaaaaaaaaaaaaaaaaaa",
   });
 });
 const user = {
@@ -58,7 +71,10 @@ const app = await buildApp({
     return { userId: f.admin, aal: "aal2" };
   },
 });
-await app.listen({ host: "127.0.0.1", port: 3001 });
+await app.listen({
+  host: "127.0.0.1",
+  port: Number(process.env.DIM_FIXTURE_API_PORT || 3001),
+});
 console.log("Disposable UI fixture ready on loopback. No external connection.");
 for (const signal of ["SIGINT", "SIGTERM"])
   process.on(signal, async () => {

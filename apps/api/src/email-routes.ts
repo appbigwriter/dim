@@ -2,9 +2,11 @@ import { demand, uuid } from "../../../packages/contracts/src/index";
 import {
   emailReplyInput,
   queueEmailReply,
+  reviewEmailIdentity,emailIdentityReviewInput,
 } from "../../../packages/core/src/email";
 import type { CommandRoute } from "./completion-routes";
 export function emailRoutes(route: CommandRoute) {
+  route('POST','/contacts/:id/email/verify',emailIdentityReviewInput,(db,actor,r)=>reviewEmailIdentity(db,actor,uuid.parse(r.params.id),r.body));
   route(
     "POST",
     "/conversations/:id/email/send",

@@ -1,111 +1,74 @@
-# Execução do plano S00–S09
+# Implementação das Stories S00–S09
 
-Data: 25/10/2026. Base: `prd/DIM-PRD-v1.0.md`, `prd/DIM-Plano-de-Acao-Sprints-Stories.md` e `prd/dim-dev-doc.md`.
+Atualizado em 26/10/2026. Base: PRD v1.0, plano de 40 Stories e integração Audience Builder → DIM autorizada pelo usuário.
 
-**Entrega de engenharia local, sem publicação em produção.** Foram criados o monorepo, seis migrations, aplicação Web/API/worker, conectores, testes e documentação. A matriz abaixo registra as 40 Stories; nenhuma linha representa homologação de produto, PR aprovado ou gate de infraestrutura assinado.
+As 40 Stories possuem implementação ou ferramentas operacionais executáveis. A tabela separa o código entregue da execução/homologação no ambiente real. Credenciais ausentes não foram substituídas por respostas de sucesso, contas fictícias ou contadores artificiais. Os gates R0–R3 não equivalem à conclusão do código: continuam dependendo de implantação, evidências de infraestrutura, revisão e aceite do produto.
 
-Legenda: **Local** = comportamento implementado/verificado no alcance local; **Parcial** = há implementação e lacunas funcionais identificadas; **Externo** = artefatos preparados, execução depende do ambiente real. Gates R0–R3 continuam abertos até os requisitos globais do plano serem homologados.
+| Sprint | Story | Implementação e evidências | Validação externa restante |
+| --- | --- | --- | --- |
+| S00 | ST-001 | Inventário de fatos/configuração e coletor operacional em `infra/inventory.ps1`; arquitetura e divergências documentadas | Inventário remoto e assinatura do operador |
+| S00 | ST-002 | Compose por ambiente, redes/portas privadas, Vault, TLS/deploy e templates sem credenciais | Aplicar em staging/produção e comprovar isolamento/TLS |
+| S00 | ST-003 | Backup Restic/pg_dump/Storage com manifestos SHA-256; restauração staging executável com readback e relatório; teste local de recuperação | Executar restore remoto e medir RPO/RTO do ambiente |
+| S00 | ST-004 | CI lint/typecheck/tests/build/audit, health, heartbeat, métricas, alertas, imagens por SHA e rollback | Pipeline remota, monitores e exercício de rollback |
+| S01 | ST-005 | 7 migrations espelhadas; 79 tabelas originais + 4 Audience + verificação factual = 84; replay, RLS, FKs e imutabilidade testados | Aplicar migrations em staging e revisar grants |
+| S01 | ST-006 | Supabase Auth/TOTP, MFA administrativo, sessão/membership revogáveis, auditoria; login local opt-in sem elevar AAL ou criar admin | GoTrue/MFA/SMTP reais |
+| S01 | ST-007 | Convites/aceitação, memberships, papéis e escopos; listagem e revogação de sessões | Ciclo real de convites e papéis da equipe |
+| S01 | ST-008 | Tenant SQL/RLS, papel dim_app, auditoria append-only, redaction e casos negativos cross-tenant | Revisão independente e Supabase Self-Hosted |
+| S02 | ST-009 | Titularidade, contratos, vigência e evidência privada vinculada à identidade | Documentos, antivírus e jurídico reais |
+| S02 | ST-010 | Consentimentos imutáveis, revogação, cancelamento de jobs e retenção de prova | Política jurídica de usos e retenção |
+| S02 | ST-011 | Persona canônica no Audience/Authority; domínio de projeto/intake/manifesto/estratégia alimenta automaticamente contexto versionado; comparação no DIM | Readback Authority e projeto real aprovados |
+| S02 | ST-012 | Disclosures por canal e licença de mídia; bloqueio de aprovação/publicação por ausência ou vencimento | Homologação de licenças e disclosures |
+| S03 | ST-013 | Diretório, tipo/status/nicho, pesquisa e paginação com escopos antes do limite | Dados reais e QA de volume |
+| S03 | ST-014 | Perfil humano/virtual/híbrido, campos condicionais e concorrência; persona Audience somente leitura | QA de produto/mobile |
+| S03 | ST-015 | Transições, pré-condições, responsáveis, histórico/outbox e suspensão segura | Política operacional aprovada |
+| S03 | ST-016 | Upload privado, AV/MIME/checksum, galeria/diff e licença; nova versão para rollback | Storage/AV e mídia real |
+| S04 | ST-017 | Catálogo, inventário, pesquisa/filtros e estados distintos de cadastro/integração/capacidade | Contas reais vinculadas |
+| S04 | ST-018 | Checklist legítimo com responsáveis/provas e componente de autorização guiada por provedor | Cadastro oficial pelo titular quando exigido |
+| S04 | ST-019 | X/Google PKCE, Meta OAuth, state único, seleção de contas do grant, titularidade e tokens somente no Vault | Apps, callbacks e permissões oficiais |
+| S04 | ST-020 | Health de todos os canais, capacidades verificadas, renovação X/Google/Meta, CAS contra revogação e reconexão | Quotas, planos e homologação oficial |
+| S05 | ST-021 | Wizard oito etapas, autosave, retomada e campos condicionais | QA com documentos e contas reais |
+| S05 | ST-022 | Delegação, tarefas, evidências privadas e validação das etapas antes da ativação | Revisão da equipe responsável |
+| S05 | ST-023 | Workflow de onboarding com tarefas concretas/dedup; Audience gere/provisiona blog com autoria, intent e readback; Resend verifica domínio/remetente; fallback humano previsto no aceite | Infra CMS/DNS/e-mail e atribuição legítima do titular |
+| S05 | ST-024 | Ativação por guardas, cancelamento/suspensão, revogação local e relatório; tarefas atribuídas com prova para revogação/transferência oficial | Confirmação do titular/provedor para encerramento externo |
+| S06 | ST-025 | Pautas/briefing/fontes/objetivo vinculados à identidade e persona; pesquisa restrita com evidência de fontes | Fontes/editoria reais |
+| S06 | ST-026 | Geração, pesquisa, triagem e análise com limite de contexto/tokens/orçamento, relatórios, custo, reconciliação e revisão humana; agentes sem ferramentas ou segredos sociais | Provedor/modelo e preços configurados |
+| S06 | ST-027 | Versões imutáveis por formato/idioma, hash, diff, fontes e mídia; ações Audience preservam contexto exato | QA editorial multimídia |
+| S06 | ST-028 | Política de risco versionada, termos/frases, fontes HTTPS com DNS/IP fixado, citação efetivamente encontrada e decisão factual independente; falha/stale bloqueiam | Política editorial e avaliação humana dos fatos |
+| S07 | ST-029 | Central de revisão, ator independente, quórum, versão/hash/política e invalidação | Homologação de política e responsáveis |
+| S07 | ST-030 | Calendário mês/semana, navegação/reagendamento, timezone e conflitos DST/concorrência | QA operacional/mobile |
+| S07 | ST-031 | Worker/outbox/BullMQ, idempotência/backoff/rate limit, conectores oficiais e IDs; executor Audience para publicação, conversa e CRM com revalidação antes da mutação | Redis/provedores reais e publicação autorizada de teste |
+| S07 | ST-032 | DLQ, erro classificável, uncertain sem reenvio cego e reconciliação com evidência | Exercício real de falha e recuperação |
+| S08 | ST-033 | Webhooks WhatsApp/Telegram e Resend assinados, raw body, janela/replay/dedupe, fila e readback | URLs públicas e eventos oficiais |
+| S08 | ST-034 | CRM, vínculos sem transferência de consentimento, exportação, pedidos/revisão/erasure; planos de retenção Storage/provedor/backup com segunda aprovação/readback | Política jurídica e destinos efetivos de retenção |
+| S08 | ST-035 | Inbox, filtros, histórico/notas/handoff, SSE autenticado com cursor/reconexão/revogação, SLA automático com executor real limitado | Operação real e responsáveis de SLA |
+| S08 | ST-036 | Telegram/WhatsApp oficiais; opt-in/janelas, templates BODY/HEADER/mídia/botões e parâmetros posicionais/nomeados; limites do template verificados | Business/Graph/bot reais e templates aprovados |
+| S09 | ST-037 | Coleta X/Meta/YouTube/CMS; fatos de entrega e-mail; amostras imutáveis, proveniência, ausência/stale e comparação de períodos; retorno Audience enriquecido | Permissões/quotas e fontes financeiras reais |
+| S09 | ST-038 | Parceiros/campanhas/identidades/entregáveis/prazos e workflow de acompanhamento | Processo comercial real |
+| S09 | ST-039 | Receita/custo imutáveis, moeda explícita, IA conciliável, exportação autorizada e receipts com custo atribuível | Reconciliação contábil e regras por jurisdição |
+| S09 | ST-040 | Cenários locais 10/50/100, recuperação DB+mídia; benchmark HTTPS staging concorrente `scripts/load-live.ts`, alertas e runbook | Carga/restore reais na VPS e SLO observado |
 
-| Sprint | Story | Estado | Evidência implementada | Pendência para aceite integral |
-| --- | --- | --- | --- | --- |
-| S00 | ST-001 | Externo | `infra/inventory.ps1`; fatos e divergências do dev-doc em `docs/architecture.md` | Inventário remoto e assinatura do operador; versões, redes, volumes e recursos |
-| S00 | ST-002 | Externo | Compose por APP_ENV, portas privadas, env template, Vault, containers sem root | Provisionar staging/prod reais, TLS, ACL de rede e segredos no Easypanel |
-| S00 | ST-003 | Externo | Scripts Restic/pg_dump/rclone; teste de restauração local de banco e mídia com checksum | Restaurar Supabase e Storage em staging e medir RPO/RTO remotos |
-| S00 | ST-004 | Parcial | CI lint/test/typecheck/audit/build; health, métricas e regras de alerta; rollback | Executar pipeline remota, CodeQL no GitHub, instalar monitor/alertas e demonstrar rollback |
-| S01 | ST-005 | Local | 79 tabelas originais + 4 Audience, 6 migrations espelhadas; replay/FKs/RLS/immutabilidade testados | Aplicar em staging, revisar grants/advisors e homologar Supabase real |
-| S01 | ST-006 | Parcial | Login Supabase/TOTP, MFA em privilégios, validação de expiração/sessão e membership | Homologar GoTrue/MFA/SMTP real; eventos de sessão verificada já auditados; homologar trilha no Auth real |
-| S01 | ST-007 | Local | Convites Auth com validade/aceitação verificada, idempotência, sessões listadas e revogação por organização/MFA; UI e testes | Homologar SMTP/GoTrue real e ciclo completo de convite |
-| S01 | ST-008 | Local | RLS sob dim_app, tenant FKs, auditoria append-only, redaction, testes negativos API/DB/Storage | Revisão independente e validação no ambiente Self-Hosted |
-| S02 | ST-009 | Local | Titulares/contratos versionados e datas; objetos privados; validação de documento clean | Bucket/cofre/ClamAV reais, homologação jurídica e retenção |
-| S02 | ST-010 | Local | Consentimentos append-only, revogação histórica, cancelamento de jobs e guarda por canal | Homologar usos/escopos jurídicos e política de prova |
-| S02 | ST-011 | Local | Persona versionada imutável, origem Audience/Authority aprovada, hashes/histórico e consulta somente leitura; readback produtivo obrigatório | Alimentar read model a partir do domínio estratégico legado e homologar origem real |
-| S02 | ST-012 | Local | Disclosures por plataforma; licença expirada e disclosure ausente bloqueiam aprovação/publicação | Homologar termos e escopos de licenças reais |
-| S03 | ST-013 | Local | Diretório, busca, tipo/status/nicho, paginação e escopos aplicados antes do limite | QA com volume e dados reais |
-| S03 | ST-014 | Local | Perfil especializado humano/virtual/híbrido, campos operacionais com concorrência e persona Audience somente leitura; UI/tenant testados | QA com dados reais, acessibilidade/mobile e homologação |
-| S03 | ST-015 | Local | Máquina de estados, guardas de direitos/ativação, histórico/outbox e testes dos três tipos | Aprovar políticas e checklists finais de ativação |
-| S03 | ST-016 | Local | Upload privado AV/MIME/checksum; MP4 100 MiB; galeria e comparação de mídia com licença/scan/tenant/URL temporária e descarte de respostas antigas | Homologar Storage/AV/proxy/licenças reais e comparação com mídia real em mobile |
-| S04 | ST-017 | Local | Catálogo, inventário, status de conta separado de integração e filtros | Popular contas e capacidades reais |
-| S04 | ST-018 | Parcial | Checklist/responsáveis/evidências; conexão Vault e health oficial Telegram/WhatsApp/Meta/Google/CMS/Resend | Wizard OAuth guiado por provedor e criação legítima/homologação das contas |
-| S04 | ST-019 | Local | X state único/expirável/PKCE; tokens somente Vault; novos canais validam titular/scopes/expiração e registram autorização oficial configurada | OAuth guiado/refresh Meta/Google/X e homologação dos apps reais |
-| S04 | ST-020 | Parcial | Monitor de X/Telegram/WhatsApp/Facebook/Instagram/YouTube/CMS/e-mail; capacidades distintas e falha fecha operação | Refresh, planos/quota, reconexão e homologação real |
-| S05 | ST-021 | Local | Wizard guiado nas oito etapas, campos condicionais por tipo, autosave e retomada por URL; navegador verificado | QA dos provedores reais, documentos e evidências no Storage real |
-| S05 | ST-022 | Local | Delegação por formulário, evidência privada vinculada à identidade e validação de todas as etapas/tarefas na ativação | Homologação com equipe e documentos reais |
-| S05 | ST-023 | Parcial | Gateway Audience e transporte WordPress com intent/receipt; remetente/domínio Resend verificados; sem cadastro social automatizado | Provisionamento legítimo CMS/DNS/e-mail, credenciais e fluxos administrativos reais |
-| S05 | ST-024 | Parcial | Ativação com guardas; suspensão de jobs/agentes; revocation_pending e relatório de offboarding | Revogação/transferência no provedor segundo titularidade e confirmação final humana |
-| S06 | ST-025 | Local | Pautas com fontes, briefs por identidade e conteúdo com objetivos | UX de briefing ampliado e pesquisa especializada |
-| S06 | ST-026 | Parcial | Agentes restritos, orçamento/tokens/custos e reconciliação de reserva após falha com comprovante, MFA, moeda e evento financeiro único | n8n/LLM reais, preços aprovados e agentes especializados de pesquisa/triagem |
-| S06 | ST-027 | Local | Versões/hash, diff textual linear, fontes/idioma/formato, comparação de mídias privadas e link de revisão de ação importada | QA multimídia/idiomas com dados reais e homologação |
-| S06 | ST-028 | Parcial | Verificador determinístico, direitos/licenças/fontes/disclosure e flags explicáveis | Checagem factual das fontes e políticas de risco configuráveis |
-| S07 | ST-029 | Local | Revisão por outro ator, hash + policy version, versão atual e invalidação após mudança | Quórum de aprovadores configurável implementado; homologar política editorial |
-| S07 | ST-030 | Local | Semana/mês navegáveis, arrastar ou editar reagendamento, concorrência por versão, UTC/fuso e tratamento de gaps/folds DST testados | Homologação de uso real e QA móvel do arrastar |
-| S07 | ST-031 | Parcial | BullMQ/outbox; X/Telegram/Facebook texto, Instagram JPEG, YouTube MP4, blog via Audience/WordPress; aprovação/contexto/conta/horário exatos e revalidação antes de cada mutação | Redis/provedores reais, formatos adicionais, métricas e contratos Audience específicos de conversa/CRM |
-| S07 | ST-032 | Local | Erros classificados, backoff, DLQ, uncertain sem reenvio e reconciliação com evidência/MFA | Exercício de falha/retomada real no Redis/provedor |
-| S08 | ST-033 | Local | Assinatura WhatsApp, segredo Telegram por conta, dedupe e fila durável; testes de assinatura adulterada e replay | Configurar webhooks e homologar eventos/status de entrega dos provedores |
-| S08 | ST-034 | Parcial | Vínculo/export/pedidos, revisão independente MFA, dry-run padrão, apagamento operacional parcial e supressão de reingestão | Execução de retenção em Storage/backups/provedores, regras jurídicas e homologação |
-| S08 | ST-035 | Parcial | Inbox três painéis, filtros antes da paginação, histórico/notas/handoff, SLA configurável/escalonamento idempotente, UI e polling | Realtime, agendamento autenticado do SLA e homologação operacional |
-| S08 | ST-036 | Local | Telegram/WhatsApp oficiais, opt-in/janelas, templates paginados BODY/header texto ou ID mídia/botões URL/quick reply; componentes inválidos bloqueiam | Business/Graph/contas reais, tipos avançados/named e homologação |
-| S09 | ST-037 | Parcial | Coleta periódica de public_metrics X, amostras imutáveis, ausência sem zero inventado e comparação por período/provedor/moeda | Coleta dos demais provedores, escopos/planos e API real homologados |
-| S09 | ST-038 | Local | Parceiros, campanhas, vínculo de identidades, entregáveis/prazos e estados | Homologação dos processos comerciais e patrocínios reais |
-| S09 | ST-039 | Local | Eventos financeiros imutáveis, moeda explícita, custos IA conciliáveis, relatório com permissão | Regras por jurisdição, exportação contábil e reconciliação financeira real |
-| S09 | ST-040 | Externo | Carga local 10/50/100, recuperação local banco+mídia, alertas e runbook | Carga concorrente em VPS com mídia/Redis/terceiros, restore remoto e SLO observado |
+## Integração Audience
 
-## Verificação realizada
+O Audience mantém projeto, persona/manifesto, estratégia de autoridade e blog. Seus comandos persistem o domínio e materializam o contexto automaticamente, inclusive read-repair após interrupção. O DIM importa somente ações aprovadas, exige revisão local independente e executa `publication`, `message` ou `crm_update` no destino aprovado. O resultado volta por outbox/receipt idempotente com erro, ID externo, evidência, métrica/frescor e custo quando houver fonte atribuível. CRM não exige conta social. Nenhum workflow aprova conteúdo por conta própria.
 
-Rodada adicional de 25/10: ESLint e TypeScript sem erros; suíte completa com 19 testes aprovados; cinco testes de conclusão/canais repetidos após a revisão da cobertura, todos aprovados; build Next.js de produção concluído. OpenAPI regenerado com 147 paths. As duas cópias da quarta migration têm SHA-256 idêntico. Serviços e banco descartáveis de navegador foram encerrados.
+## Alcance operacional
 
+Os 12 arquivos n8n chamam o backend autenticado; não restam nós genéricos que apenas dizem para configurar um workflow. Cadastro social, decisão editorial e confirmação de titularidade continuam humanos onde o plano assim exige, com tarefas/filas persistidas e auditadas.
 
-- Lint ESLint, TypeScript e build Next.js executados localmente.
-- Testes automatizados em `tests/`: schema/constraints/RLS, API/auth/MFA/tenant/concorrência, onboarding humano/virtual/híbrido, aprovação exata, idempotência, resultado incerto, revogação, consentimento, webhook, OAuth, AV/Storage, agentes/custos e recuperação.
-- Carga: 120 requisições sequenciais por cenário de 10, 50 e 100 identidades, sem erros no relatório local. Os resultados não medem rede, Redis, disco da VPS ou terceiros.
-- Browser adicional: wizard guiado, nova identidade, persona com campos, autosave e retomada por URL/reload; evidência `docs/screenshots/onboarding-guided-local.png`.
-- Browser: login com GoTrue/API de teste descartáveis em loopback, dashboard autenticado, criação pelo wizard e fluxo de autosave. Nenhuma credencial externa foi usada.
-- `docker compose config` validado. Build/execução de containers não realizado: daemon Docker local desligado.
-- npm audit: sem vulnerabilidades reportadas no lockfile na instalação; repetir no gate de release.
+Formatos implementados: texto X/Telegram/Facebook, JPEG Instagram, MP4 YouTube e artigo WordPress via Audience; mensagens oficiais WhatsApp/Telegram/e-mail e atualização CRM. Formatos futuros não alteram essas capacidades mínimas. Métricas inexistentes nas APIs não são simuladas. A verificação factual confirma evidência/citação e registra julgamento humano; não transforma uma fonte em garantia automática de verdade.
 
-## Fundação da integração Audience — histórico anterior à rodada ampliada
+A interface principal é PT-BR e os conteúdos aceitam PT-BR/EN/ES; o seletor atual controla formatação regional. Tradução integral da interface e certificação WCAG completa não foram declaradas como homologadas.
 
-O DIM é executor; o Audience Builder gere persona, trajetória de autoridade e blog/editorial. Novas identidades usam a origem Audience. Foram implementados vínculo, sincronização autenticada, validação do contrato real de persona, hashes/aprovação, histórico imutável/RLS, interface somente leitura e invalidação de conteúdo/jobs. A suíte passou com 24 testes e a fixture foi aceita pelo validador real do checkout Audience.
+## Validação
 
-Verificação final desta etapa: build de produção concluído, seis testes direcionados de API/Audience repetidos e aprovados, OpenAPI regenerado com 151 paths e tela de vínculo conferida no navegador descartável (`docs/screenshots/audience-integration-local.png`).
+Suítes locais, typecheck/lint/build, testes negativos, hashes das migrations e OpenAPI são atualizados na rodada final. Histórico de screenshots e relatórios em `docs/screenshots`, `docs/load-report.json` e `docs/recovery-report.json` refere-se a ambientes descartáveis. Nenhuma implantação, migration remota ou envio externo foi efetuado nesta rodada. Os testes HTTP usam transporte controlado, não credenciais oficiais.
 
-A quinta migration acrescenta `audience_bindings` e `audience_context_versions`, preservando as 79 tabelas originais. A integração remota completa **continua pendente**: export persistido no Audience, pedidos aprovados de execução, adaptadores faltantes e receipts/resultados de retorno. Detalhes em [audience-integration.md](audience-integration.md).
+## Evidências finais — 26/10/2026
 
-## Cobertura dos canais aprovada
-
-O escopo inclui Blogs, Instagram, Facebook, X, WhatsApp, Telegram, E-mail, YouTube e CRM para todas as identidades. **A operação integral ainda depende das lacunas funcionais e da homologação descritas abaixo.** A matriz está na Web e em `GET /api/v1/influencers/:id/channels`; [channel-coverage.md](channel-coverage.md) apresenta os adaptadores atuais, formatos e limitações. Nesta rodada foram acrescentados Facebook, Instagram, YouTube, Resend e o transporte de blog via Audience/WordPress.
-
-## Lacunas transversais
-
-Interface principal PT-BR; idiomas de conteúdo PT-BR/EN/ES e formatação regional existem, mas tradução integral da interface ainda não foi entregue. Alguns comandos administrativos avançados usam editor JSON e referências de UUID. A acessibilidade tem controles rotulados, foco, responsividade e mensagens de erro; WCAG 2.2 AA completa e testes móveis visuais ainda precisam de homologação. Os requisitos globais de PR revisado, produto homologado e gates remotos não foram substituídos por testes locais.
-
-## Impedimentos externos confirmados
-
-Não há `.env` de runtime, credenciais DB/Auth/Vault/n8n, acesso autorizado à VPS/Easypanel, app X/Business WhatsApp, bucket/AV configurados ou backup remoto no checkout. Esses valores não foram inventados. Os módulos falham fechados até serem configurados. Nenhum deploy, publicação social, convite real ou envio de mensagem foi efetuado.
-
-## Rodada autônoma ampliada — 25/10/2026
-
-Além da fundação anterior, foram implementados export persistido/ações aprovadas/revogação/receipts e transporte WordPress no Audience; intake, revisão local, executor contínuo separado, agenda exata, outbox de retorno e proteção contra duplicidade/regressão no DIM. Os adaptadores Facebook/Instagram/YouTube e Resend possuem HTTP real injetável e testes negativos; não houve envio externo.
-
-A sexta migration acrescenta duas tabelas Audience (total 83), configuração de executor/papel separado, AAL original de publicação, sequência imutável de receipts e backoff de retorno. Runtime sem credenciais falha fechado. Alterar o executor durante uma chamada remota, revogar membership/permissões ou promovê-lo a admin não autoriza o envio.
-
-QA Web descartável: perfil especializado/Audience somente leitura; busca/importação de ação; link para /studio/:id; filtros/SLA de Inbox; diff de duas versões. Evidências: docs/screenshots/audience-execution-local.png, inbox-controls-local.png e content-comparison-local.png. Serviços de teste são restritos a loopback, sem provedor externo.
-
-Smoke HTTP entre os projetos usou Next Audience real e adapters DIM: contexto, ações, receipt/replay, esvaziamento da fila, tenant inválido e revogação. A rodada de testes/build final e a contagem atual estão no registro abaixo; as contagens anteriores são históricas.
-
-### Pendências funcionais que não são apenas credenciais
-
-- Integrar o domínio estratégico legado Audience (projeto/manifest/persona) ao novo read model; produção exige readback Authority configurado.
-- Contratos Audience específicos para ações de conversa/CRM e enriquecimento de receipts com métricas/custos.
-- OAuth guiado/refresh dos novos canais, formatos adicionais, coleta de métricas além de X e recebimento/delivery/bounce de e-mail.
-- Workflow específico de pesquisa/triagem, checagem factual avançada e políticas de risco; dez workflows n8n ainda exigem configuração/handoff.
-- Realtime/agendamento de SLA, provisionamento e revogação/transferência externas, retenção de Storage/backups/provedores e homologação global.
-
-Os gates R0–R3 e o aceite integral das 40 Stories permanecem abertos. Implementação local de um comportamento não é homologação de toda a plataforma.
-
-### Verificação final desta rodada
-
-- DIM: npm run check aprovado — ESLint, TypeScript, 51 testes e build Next de produção.
-- Audience: TypeScript, 314 testes em 32 arquivos e build de produção com lint aprovados. O teste legado que gravava fixtures no checkout foi isolado no diretório temporário e repetido com sucesso.
-- OpenAPI DIM regenerado com 165 paths. Sexta migration espelhada com SHA-256 idêntico: 77353B2A2DC2C1CA86C5387AD19704A79102C502814E5A53F77C178FCFBF3F49.
-- Revisões funcionais/segurança identificaram corridas, regressão terminal, AAL indevido e duplicidade por chave alternativa; correções cobertas por testes negativos. O revisor delegado atingiu limite de uso antes de emitir aprovação final; não se declara gate independente formal aprovado.
-- Smoke HTTP entre projetos e QA Web desktop locais aprovados; servidores/abas descartáveis encerrados. Sem deploy, migration remota, publicação social ou envio real de e-mail/mensagem.
+- DIM: lint, TypeScript, 81 testes na suíte completa e build de produção aprovados; auditoria npm sem vulnerabilidades. Casos adicionais dirigidos confirmam custo decimal sem perda de precisão, CRM sob política factual e bloqueio de desvio de conversa privada para canal público.
+- Audience: lint, TypeScript, 324 testes em 34 arquivos e build Next de produção aprovados. Next/React/ESLint/Vitest atualizados para remover alertas críticos/altos herdados; npm audit sem vulnerabilidades. Rotas legadas de blog também verificam operador/ownership; rotas dinâmicas compatíveis com params assíncronos.
+- Interoperabilidade executada por `npx tsx scripts/verify-audience-contract.ts`: publicação, mensagem e CRM, templates nomeados, hash canônico e receipts enriquecidos aceitos pelos validadores reais dos dois checkouts. O script é somente local, sem HTTP ou env secretos.
+- OpenAPI regenerado: 184 paths. SHA-256 das duas cópias da sétima migration: `30B63DCCA8B4B9B490ABC0B10D4353232B366E477E92CF93CB6FCD79B79463FA`.
+- Carga local: 120 requisições em cada cenário 10/50/100 identidades, zero erros; simulação sequencial PGlite/Fastify, distinta de capacidade real da VPS. Recuperação local DB e mídia verificada por checksum.
+- Navegador descartável: login Supabase de teste, Inbox com realtime conectado, controles SLA/retenção e ficha YouTube com autorização correspondente e health. Identificado/corrigido redirecionamento após login e remoção dos botões de provedores incorretos na ficha. Nenhuma autorização OAuth real foi iniciada. Abas/servidores de teste foram encerrados.
+- Revisão técnica identificou e corrigiu concorrência de mensagens, payload/AAL forjado, desvio do canal privado, ausência de validação do receipt e precisão financeira. A revisão formal de PR/produto não foi fabricada. O aceite de produção permanece nos gates externos do plano.

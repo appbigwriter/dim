@@ -3,6 +3,7 @@ import { demand, type Actor } from "../../contracts/src/index";
 import { canonicalHash } from "../../contracts/src/audience";
 import {
   validateAudienceAction,
+  audienceReceipt,
   type AudienceReceipt,
 } from "../../contracts/src/audience-actions";
 import type { AudienceActions } from "../../connectors/src/audience-actions";
@@ -13,12 +14,24 @@ import { audienceBlockers, syncAudience } from "./audience";
 import type { AudienceProvider } from "../../connectors/src/audience";
 import { createResource } from "./resources";
 import { contentVersion, schedule } from "./editorial";
+import { queueAudienceOperation } from "./audience-operations";
 
 export async function executionReceipt(
   db: DB,
   execution: any,
   status: AudienceReceipt["status"],
-  result: { externalId?: string; errorCode?: string } = {},
+  result: Partial<
+    Pick<
+      AudienceReceipt,
+      | "externalId"
+      | "errorCode"
+      | "metrics"
+      | "cost"
+      | "evidenceUrls"
+      | "metricsProvenance"
+      | "metricsObservedAt"
+    >
+  > = {},
 ) {
   const current = await one(
     db,
@@ -30,12 +43,23 @@ export async function executionReceipt(
     "SELECT * FROM custom_dim.audience_execution_receipts WHERE execution_id=$1 ORDER BY sequence_no DESC LIMIT 1",
     [execution.id],
   );
-  if (previous && ["succeeded", "cancelled"].includes(current.last_status))
+  if (
+    previous &&
+    ["succeeded", "cancelled"].includes(current.last_status) &&
+    status !== current.last_status
+  )
     return previous.receipt;
+  const {
+    receiptId: _receiptId,
+    actionId: _actionId,
+    actionHash: _actionHash,
+    status: _status,
+    occurredAt: _occurredAt,
+    ...previousResult
+  } = previous?.receipt || {};
   if (
     previous?.status === status &&
-    previous.receipt.externalId === result.externalId &&
-    previous.receipt.errorCode === result.errorCode
+    canonicalHash(previousResult) === canonicalHash(result)
   )
     return previous.receipt;
   const stateHash = canonicalHash({
@@ -43,14 +67,14 @@ export async function executionReceipt(
     ...result,
     previous_receipt_id: previous?.id || null,
   });
-  const receipt: AudienceReceipt = {
+  const receipt: AudienceReceipt = audienceReceipt.parse({
     receiptId: randomUUID(),
     actionId: execution.action_id,
     actionHash: execution.action_hash,
     status,
     occurredAt: new Date().toISOString(),
     ...result,
-  };
+  });
   await insert(db, "audience_execution_receipts", {
     id: receipt.receiptId,
     organization_id: execution.organization_id,
@@ -177,21 +201,25 @@ export async function importAudienceAction(
       "Ação foi aprovada para outro contexto",
       409,
     );
-    const account = await resource(
-      tx,
-      "social_accounts",
-      action.targetAccountId,
-      fresh,
-    );
-    authorize(fresh, "accounts.read", { influencerId, accountId: account.id });
+    const account =
+      action.kind !== "crm_update"
+        ? await resource(tx, "social_accounts", action.targetAccountId!, fresh)
+        : null;
+    if (account)
+      authorize(fresh, "accounts.read", {
+        influencerId,
+        accountId: account.id,
+      });
     const platform = await one(
       tx,
       "SELECT code FROM custom_dim.platforms WHERE id=$1",
-      [account.platform_id],
+      [account?.platform_id || null],
     );
     demand(
-      account.influencer_id === influencerId &&
-        platform?.code === (action.channel === "blog" ? "cms" : action.channel),
+      action.kind === "crm_update" ||
+        (account?.influencer_id === influencerId &&
+          platform?.code ===
+            (action.channel === "blog" ? "cms" : action.channel)),
       "AUDIENCE_ACTION_ACCOUNT",
       "Conta ou canal não pertence ao vínculo",
       409,
@@ -213,6 +241,9 @@ export async function importAudienceAction(
         audience_action_hash: action.actionHash,
         title: action.content.title,
         ...(action.content.video || {}),
+        audience_action_kind: action.kind,
+        ...(action.message ? { message: action.message } : {}),
+        ...(action.crm ? { crm: action.crm } : {}),
       },
     });
     const execution = await insert(tx, "audience_execution_requests", {
@@ -226,7 +257,7 @@ export async function importAudienceAction(
       action,
       content_id: content.id,
       content_version_id: version.id,
-      social_account_id: account.id,
+      social_account_id: account?.id,
       requested_by: fresh.userId,
       automatic,
     });
@@ -306,6 +337,8 @@ export async function scheduleAudienceExecution(
     "Conteúdo mudou; obtenha nova aprovação da origem",
     409,
   );
+  if (action.kind !== "publication")
+    return queueAudienceOperation(db, actor, execution);
   const job = await schedule(
     db,
     actor,
@@ -321,6 +354,47 @@ export async function scheduleAudienceExecution(
 }
 
 export async function observeAudienceExecutions(db: Database) {
+  const operations = (
+    await db.query(
+      "SELECT e.id FROM custom_dim.audience_execution_requests e JOIN custom_dim.operation_jobs o ON o.id=e.operation_job_id WHERE e.last_status NOT IN('succeeded','cancelled') AND e.last_status<>CASE o.status WHEN 'queued' THEN 'scheduled' WHEN 'retry' THEN 'scheduled' WHEN 'completed' THEN 'succeeded' ELSE o.status END ORDER BY e.updated_at LIMIT 100",
+    )
+  ).rows;
+  for (const item of operations)
+    await db.transaction(async (tx) => {
+      const e = await one(
+        tx,
+        "SELECT * FROM custom_dim.audience_execution_requests WHERE id=$1 FOR UPDATE",
+        [item.id],
+      );
+      if (!e || ["succeeded", "cancelled"].includes(e.last_status)) return;
+      const job = await one(
+        tx,
+        "SELECT status,last_error,result FROM custom_dim.operation_jobs WHERE id=$1",
+        [e.operation_job_id],
+      );
+      const status = (
+        {
+          queued: "scheduled",
+          retry: "scheduled",
+          completed: "succeeded",
+          running: "running",
+          executing: "running",
+          uncertain: "uncertain",
+          failed: "failed",
+          blocked: "blocked",
+          cancelled: "cancelled",
+        } as Record<string, AudienceReceipt["status"]>
+      )[job?.status];
+      if (status && status !== e.last_status)
+        await executionReceipt(tx, e, status, {
+          ...(job.result?.externalId
+            ? { externalId: job.result.externalId }
+            : {}),
+          ...(job.last_error && /^[A-Z0-9_]{1,120}$/.test(job.last_error)
+            ? { errorCode: job.last_error }
+            : {}),
+        });
+    });
   const rows = (
     await db.query(`SELECT e.id FROM custom_dim.audience_execution_requests e
     JOIN custom_dim.publication_jobs j ON j.content_version_id=e.content_version_id AND j.social_account_id=e.social_account_id
@@ -390,6 +464,104 @@ export async function deliverAudienceReceipt(
     },
     row.receipt,
   );
+}
+
+export async function enrichAudienceReceipts(db: Database) {
+  const candidates = (
+    await db.query(
+      "SELECT id FROM custom_dim.audience_execution_requests WHERE last_status='succeeded' AND (last_enriched_at IS NULL OR last_enriched_at<now()-interval '15 minutes') ORDER BY last_enriched_at NULLS FIRST,id LIMIT 100",
+    )
+  ).rows;
+  let enriched = 0;
+  for (const candidate of candidates)
+    await db.transaction(async (tx) => {
+      const execution = await one(
+        tx,
+        "SELECT * FROM custom_dim.audience_execution_requests WHERE id=$1 AND last_status='succeeded' FOR UPDATE",
+        [candidate.id],
+      );
+      if (!execution) return;
+      const latest = await one(
+        tx,
+        "SELECT receipt FROM custom_dim.audience_execution_receipts WHERE execution_id=$1 ORDER BY sequence_no DESC LIMIT 1",
+        [execution.id],
+      );
+      if (!latest) return;
+      const {
+        receiptId: _id,
+        actionId: _action,
+        actionHash: _hash,
+        status: _status,
+        occurredAt: _time,
+        ...result
+      } = latest.receipt;
+      const post = await one(
+        tx,
+        "SELECT p.* FROM custom_dim.published_posts p JOIN custom_dim.publication_jobs j ON j.id=p.job_id WHERE j.organization_id=$1 AND j.content_version_id=$2 AND j.social_account_id=$3 AND p.state='published' ORDER BY p.published_at DESC LIMIT 1",
+        [
+          execution.organization_id,
+          execution.content_version_id,
+          execution.social_account_id,
+        ],
+      );
+      if (post?.external_url && /^https:\/\//.test(post.external_url))
+        result.evidenceUrls = [post.external_url];
+      if (post?.metrics_status === "available") {
+        const samples = (
+          await tx.query(
+            "SELECT metric_code,metric_value,observed_at,provenance FROM custom_dim.publication_metrics WHERE published_post_id=$1 AND observed_at=(SELECT max(observed_at) FROM custom_dim.publication_metrics WHERE published_post_id=$1) ORDER BY metric_code LIMIT 50",
+            [post.id],
+          )
+        ).rows;
+        if (
+          samples.length &&
+          samples.every(
+            (s) =>
+              Number.isSafeInteger(Number(s.metric_value)) &&
+              Number(s.metric_value) >= 0,
+          )
+        ) {
+          result.metrics = Object.fromEntries(
+            samples.map((s) => [s.metric_code, Number(s.metric_value)]),
+          );
+          result.metricsProvenance = [
+            ...new Set(samples.map((s) => s.provenance)),
+          ]
+            .join(",")
+            .slice(0, 200);
+          result.metricsObservedAt = new Date(
+            samples[0].observed_at,
+          ).toISOString();
+        }
+      }
+      const costs = (
+        await tx.query(
+          "SELECT currency,sum(amount)::text AS amount FROM custom_dim.cost_events WHERE organization_id=$1 AND influencer_id=$2 AND cost_type=$3 GROUP BY currency",
+          [
+            execution.organization_id,
+            execution.influencer_id,
+            `audience:${execution.id}`,
+          ],
+        )
+      ).rows;
+      if (costs.length === 1 && /^\d{1,12}(\.\d{1,6})?$/.test(costs[0].amount))
+        result.cost = {
+          amount: costs[0].amount,
+          currency: costs[0].currency.trim(),
+        };
+      const receipt = await executionReceipt(
+        tx,
+        execution,
+        "succeeded",
+        result,
+      );
+      await tx.query(
+        "UPDATE custom_dim.audience_execution_requests SET last_enriched_at=now() WHERE id=$1",
+        [execution.id],
+      );
+      if (receipt.receiptId !== latest.receipt.receiptId) enriched++;
+    });
+  return { enriched };
 }
 
 export async function flushAudienceReceipts(

@@ -20,7 +20,7 @@ export async function fetchWhatsappTemplates(
     );
     url.searchParams.set(
       "fields",
-      "id,name,status,language,category,components",
+      "id,name,status,language,category,parameter_format,components",
     );
     url.searchParams.set("limit", "100");
     if (cursor) url.searchParams.set("after", cursor);
@@ -64,10 +64,24 @@ export type WhatsappComponent = {
 };
 export const templateComponentInput = z
   .object({
+    named_body: z
+      .record(
+        z.string().regex(/^[a-z][a-z0-9_]{0,63}$/),
+        z.string().min(1).max(32768),
+      )
+      .refine((value) => Object.keys(value).length <= 100)
+      .optional(),
     header: z
       .union([
         z
-          .object({ type: z.literal("text"), text: z.string().min(1).max(60) })
+          .object({
+            type: z.literal("text"),
+            text: z.string().min(1).max(60),
+            parameter_name: z
+              .string()
+              .regex(/^[a-z][a-z0-9_]{0,63}$/)
+              .optional(),
+          })
           .strict(),
         z
           .object({
@@ -93,15 +107,23 @@ export const templateComponentInput = z
   })
   .strict();
 export type TemplateComponentInput = z.input<typeof templateComponentInput>;
-function variableCount(value: string) {
+function variables(value: string): string[] {
+  demand(
+    typeof value === "string" && value.length <= 32768,
+    "TEMPLATE_DEFINITION_INVALID",
+    "Texto do template fora do limite",
+  );
   const placeholders = [...value.matchAll(/\{\{([^{}]+)\}\}/g)].map(
     (m) => m[1],
   );
   demand(
-    placeholders.every((v) => /^\d+$/.test(v)),
-    "TEMPLATE_COMPONENT_UNSUPPORTED",
-    "Parâmetros nomeados exigem adaptador específico",
+    placeholders.every((value) => /^\d+$/.test(value)) ||
+      placeholders.every((value) => /^[a-z][a-z0-9_]{0,63}$/.test(value)),
+    "TEMPLATE_PARAMETERS_MIXED",
+    "Parâmetros nomeados e posicionais não podem ser misturados",
   );
+  if (placeholders.some((value) => !/^\d+$/.test(value)))
+    return [...new Set(placeholders)];
   const positions = [...new Set(placeholders.map(Number))].sort(
     (a, b) => a - b,
   );
@@ -110,7 +132,13 @@ function variableCount(value: string) {
     "TEMPLATE_PARAMETERS_REQUIRED",
     "Parâmetros posicionais devem ser consecutivos",
   );
-  return positions.length;
+  return positions.map(String);
+}
+function rendered(text: string, values: Record<string, string>) {
+  return text.replace(
+    /\{\{([^{}]+)\}\}/g,
+    (_match, name: string) => values[name] || "",
+  );
 }
 export function templateParameters(
   template: any,
@@ -126,16 +154,70 @@ export function templateParameters(
     "TEMPLATE_COMPONENT_UNSUPPORTED",
     "Componente de template não suportado",
   );
-  const count = variableCount(
-    definitions.find((c: any) => c.type === "BODY")?.text || "",
+  demand(
+    definitions.length <= 4 &&
+      new Set(definitions.map((value: any) => value.type)).size ===
+        definitions.length,
+    "TEMPLATE_DEFINITION_INVALID",
+    "Componentes duplicados ou acima do limite",
+  );
+  const body = definitions.find((c: any) => c.type === "BODY")?.text || "";
+  const bodyVariables = variables(body),
+    named = bodyVariables.some((value) => !/^\d+$/.test(value));
+  const count = bodyVariables.length;
+  demand(
+    count <= 100,
+    "TEMPLATE_PARAMETERS_REQUIRED",
+    "Corpo deve conter até 100 parâmetros",
+  );
+  const format =
+    template.content?.parameter_format || template.parameter_format;
+  const textVariables = [
+    ...bodyVariables,
+    ...variables(
+      definitions.find(
+        (component: any) =>
+          component.type === "HEADER" && component.format === "TEXT",
+      )?.text || "",
+    ),
+  ];
+  demand(
+    !format ||
+      (["NAMED", "POSITIONAL"].includes(format) &&
+        textVariables.every((name) =>
+          format === "NAMED" ? !/^\d+$/.test(name) : /^\d+$/.test(name),
+        )),
+    "TEMPLATE_PARAMETER_FORMAT",
+    "Formato dos parâmetros diverge do template aprovado",
   );
   demand(
-    values.length === count &&
+    (named
+      ? values.length === 0 &&
+        supplied.named_body &&
+        bodyVariables.every((name) =>
+          Object.hasOwn(supplied.named_body!, name),
+        ) &&
+        Object.keys(supplied.named_body).length === count
+      : !Object.keys(supplied.named_body || {}).length &&
+        values.length === count) &&
       values.every(
         (v) => typeof v === "string" && v.length > 0 && v.length <= 32768,
       ),
     "TEMPLATE_PARAMETERS_REQUIRED",
-    `Este template exige ${count} parâmetros de texto em ordem`,
+    named
+      ? `Parâmetros nomeados obrigatórios: ${bodyVariables.join(", ")}`
+      : `Este template exige ${count} parâmetros de texto em ordem`,
+  );
+  const bodyValues = named
+    ? supplied.named_body!
+    : Object.fromEntries(
+        values.map((value, index) => [String(index + 1), value]),
+      );
+  demand(
+    rendered(body, bodyValues).length <=
+      (definitions.length === 1 ? 32768 : 1024),
+    "TEMPLATE_BODY_TOO_LONG",
+    "Texto final do corpo excede o limite do template",
   );
   const result: WhatsappComponent[] = [];
   const header = definitions.find((c: any) => c.type === "HEADER");
@@ -173,15 +255,33 @@ export function templateParameters(
         },
       ],
     });
-  } else if (header && variableCount(header.text || "")) {
+  } else if (header && variables(header.text || "").length) {
+    const names = variables(header.text),
+      parameterName = names[0];
     demand(
-      variableCount(header.text) === 1 && supplied.header?.type === "text",
+      names.length === 1 && supplied.header?.type === "text",
       "TEMPLATE_HEADER_REQUIRED",
       "Informe o parâmetro de texto do cabeçalho",
     );
+    demand(
+      rendered(header.text, { [parameterName]: supplied.header.text }).length <=
+        60 &&
+        (!supplied.header.parameter_name ||
+          supplied.header.parameter_name === parameterName),
+      "INVALID_TEMPLATE_HEADER",
+      "Cabeçalho final ou nome de parâmetro difere do template aprovado",
+    );
     result.push({
       type: "header",
-      parameters: [{ type: "text", text: supplied.header.text }],
+      parameters: [
+        {
+          type: "text",
+          text: supplied.header.text,
+          ...(!/^\d+$/.test(parameterName)
+            ? { parameter_name: parameterName }
+            : {}),
+        },
+      ],
     });
   } else
     demand(
@@ -189,11 +289,26 @@ export function templateParameters(
       "INVALID_TEMPLATE_HEADER",
       "Este template não recebe parâmetro de cabeçalho",
     );
-  if (values.length)
+  if (count)
     result.push({
       type: "body",
-      parameters: values.map((text) => ({ type: "text", text })),
+      parameters: bodyVariables.map((name) => ({
+        type: "text",
+        text: bodyValues[name],
+        ...(named ? { parameter_name: name } : {}),
+      })),
     });
+  const footer = definitions.find(
+    (component: any) => component.type === "FOOTER",
+  );
+  demand(
+    !footer ||
+      (typeof footer.text === "string" &&
+        footer.text.length <= 60 &&
+        !variables(footer.text).length),
+    "TEMPLATE_FOOTER_INVALID",
+    "Rodapé deve conter somente texto estático de até 60 caracteres",
+  );
   const buttons =
     definitions.find((c: any) => c.type === "BUTTONS")?.buttons || [];
   demand(
@@ -212,7 +327,7 @@ export function templateParameters(
     );
     if (
       button.type === "QUICK_REPLY" ||
-      (button.type === "URL" && variableCount(button.url || ""))
+      (button.type === "URL" && variables(button.url || "").length)
     ) {
       const kind = button.type === "URL" ? "url" : "quick_reply";
       demand(
@@ -220,13 +335,31 @@ export function templateParameters(
         "TEMPLATE_BUTTON_REQUIRED",
         `Informe parâmetro do botão ${index}`,
       );
-      if (kind === "url")
+      if (kind === "url") {
         demand(
-          variableCount(button.url) === 1 &&
+          variables(button.url).length === 1 &&
             button.url.endsWith("{{1}}") &&
             /^https:\/\//i.test(button.url),
           "INVALID_TEMPLATE_BUTTON",
           "URL dinâmica deve usar um sufixo HTTPS aprovado",
+        );
+        const prefix = new URL(button.url.replace("{{1}}", "")),
+          final = new URL(button.url.replace("{{1}}", value.value));
+        demand(
+          final.href.length <= 2000 &&
+            final.protocol === "https:" &&
+            !final.username &&
+            !final.password &&
+            final.origin === prefix.origin &&
+            !/[\r\n]/.test(value.value),
+          "INVALID_TEMPLATE_BUTTON",
+          "Sufixo deve preservar a origem HTTPS aprovada e o limite da URL",
+        );
+      } else
+        demand(
+          value.value.length <= 128 && !/[\r\n]/.test(value.value),
+          "INVALID_TEMPLATE_BUTTON",
+          "Payload do botão deve ter até 128 caracteres",
         );
       result.push({
         type: "button",

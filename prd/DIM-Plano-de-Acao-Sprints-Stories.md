@@ -10,7 +10,7 @@
 
 O produto deve contemplar **Blogs, Instagram, Facebook, X, WhatsApp, Telegram, E-mail, YouTube e CRM para todos os influenciadores**, respeitando titularidade e permissões próprias. O recorte de MVP com um conector social não substitui esse escopo integral. Uma identidade ativa e um canal conectado não comprovam a entrega da operação completa.
 
-A conferência em `docs/channel-coverage.md` identifica código ausente para Blogs, Instagram, Facebook, E-mail e YouTube. Cadastro no catálogo não conta como integração entregue. O CRM é módulo interno e não exige uma conta social externa; seus fluxos precisam estar funcionais por identidade.
+A conferência atual em `docs/channel-coverage.md` documenta os adaptadores operacionais dos nove canais, formatos e dependências de homologação. O CRM é módulo interno e não exige conta social externa. Cadastro no catálogo não substitui autorização, capacidade verificada e execução do fluxo correspondente.
 
 O aceite integral exige, por canal: cadastro/titularidade legítimos; vínculo à identidade; integração oficial; capacidades mínimas verificadas; criação e entrega do formato correspondente; status/erros auditados; e homologação real. A matriz de canais da ficha mostra cada pendência e não declara prontidão integral enquanto essas condições não forem comprovadas.
 
@@ -412,8 +412,8 @@ Inventário real da VPS → validação do Supabase → migration e Auth → RBA
 ### Dependências externas e bloqueadores
 
 - `prd/dim-dev-doc.md` localizado na implementação: domínio, serviço e Supabase central documentados; rede, volumes, versões e credenciais ainda exigem inventário remoto.
-- Plataforma CMS de blogs ainda a definir.
-- Definir cofre de segredos, backup fora da VPS e SMTP.
+- WordPress administrado pelo Audience implementado; configurar domínio, credenciais e readback reais.
+- Hashicorp Vault, Restic/Storage e Resend implementados; configurar os serviços e o SMTP do Auth no ambiente.
 - Confirmar permissões de Meta/X/WhatsApp e responsabilidades por dados pessoais.
 - Definir política financeira por moeda e região.
 
@@ -440,7 +440,7 @@ Planejamento no primeiro dia da sprint; daily de 15 minutos; refinamento na meta
 
 Código implementado na raiz deste projeto em `apps/`, `packages/`, `supabase/`, `infra/`, `n8n/` e `tests/`. As 40 Stories foram rastreadas individualmente em [docs/implementation-status.md](../docs/implementation-status.md), com evidências, lacunas e dependências externas. Execute `npm run check` para validação local e consulte [README.md](../README.md) e [runbook](../docs/runbook.md) para configurar o ambiente.
 
-Os testes locais não encerram automaticamente os gates acima. Deploy, publicação oficial, restauração remota, PR revisado e homologação continuam condicionados às evidências e permissões reais do ambiente. As Stories parcialmente implementadas estão explicitamente identificadas na matriz; não foram marcadas como concluídas por haver apenas scaffolding ou configuração de exemplo.
+Os testes locais não encerram automaticamente os gates acima. Deploy, publicação oficial, restauração remota, PR revisado e homologação continuam condicionados às evidências e permissões reais do ambiente. A rodada de 26/10 completa as lacunas de código das 40 Stories e da integração Audience; a matriz atual separa implementação executável de validação externa. Tarefas humanas de cadastro/titularidade/revisão previstas no próprio aceite permanecem auditadas, sem substituir regras oficiais das plataformas.
 
 ## Integração obrigatória Audience Builder → executor DIM — 25/10/2026
 
@@ -449,9 +449,9 @@ O Audience Builder gere persona, trajetória de autoridade e gestão editorial d
 | Item | Aceite | Estado verificado |
 | --- | --- | --- |
 | ABDIM-001 — Contexto e vínculo por identidade | Pacote aprovado compatível com a origem, tenant/projeto, hashes, histórico, idempotência, persona somente leitura, invalidação de conteúdo e testes negativos | Local nos dois projetos; readback produtivo Authority exige configuração real |
-| ABDIM-002 — Export persistido no Audience | API oficial autenticada, readback real e contexto completo por tenant/projeto | Local JSON/Supabase append-only; smoke HTTP passou; domínio estratégico legado ainda não alimenta automaticamente o read model |
-| ABDIM-003 — Pedidos aprovados e execução DIM | Ação/canal/destino concretos, aprovação exata, contexto vigente, idempotência, guards e adaptador operacional para cada canal do escopo | Publicações implementadas com executor separado e revisão local; contratos específicos de conversa/CRM e formatos adicionais pendentes |
-| ABDIM-004 — Resultados de volta ao Audience | Receipt idempotente, IDs externos/evidências, custos, erros e métricas; `uncertain` sem reenvio cego | Recibos básicos/receptor/outbox/backoff locais; custos/métricas completos e homologação pendentes |
-| ABDIM-005 — Blog e homologação ponta a ponta | Audience gere editorial/blog; DIM executa ação aprovada via runtime oficial; testar mudança/revogação e retorno para todos os canais | Gateway WordPress na origem com intent/replay/revogação testados; provisionamento e homologação real pendentes |
+| ABDIM-002 — Export persistido no Audience | API oficial autenticada, readback real e contexto completo por tenant/projeto | Domínio de projeto/intake/manifesto/estratégia/blog materializa contexto automaticamente; JSON/Supabase append-only e read-repair testados |
+| ABDIM-003 — Pedidos aprovados e execução DIM | Ação/canal/destino concretos, aprovação exata, contexto vigente, idempotência, guards e adaptador operacional para cada canal do escopo | Publicação, mensagem e CRM implementados, com executor separado/revisão local; concorrência, revogação e destino privado testados |
+| ABDIM-004 — Resultados de volta ao Audience | Receipt idempotente, IDs externos/evidências, custos, erros e métricas; `uncertain` sem reenvio cego | Contratos enriquecidos, coletor, custo atribuível, validação, outbox e backoff; números ausentes não são inventados; homologação externa restante |
+| ABDIM-005 — Blog e homologação ponta a ponta | Audience gere editorial/blog; DIM executa ação aprovada via runtime oficial; testar mudança/revogação e retorno para todos os canais | Provisionamento na origem com autenticação/intent/autoria, WordPress readback, publicação e métricas implementados; homologação real separada |
 
 Especificação verificável: `docs/audience-integration.md`. Nenhum item pendente é considerado entregue pelo simples registro nesta tabela.

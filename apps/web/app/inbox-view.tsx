@@ -1,6 +1,7 @@
 "use client";
-import { useState, useEffect } from "react";
-import { api } from "./client";
+import { useState, useEffect, useRef } from "react";
+import { api, authClient, getSimpleToken } from "./client";
+import RetentionPanel from "./retention-panel";
 import { ErrorBanner, Empty, StatusChip } from "../../../packages/ui/src/index";
 export default function InboxView({ organization }: { organization: string }) {
   const [conversations, setConversations] = useState<any[]>([]),
@@ -13,6 +14,7 @@ export default function InboxView({ organization }: { organization: string }) {
     [purpose, setPurpose] = useState("service"),
     [template, setTemplate] = useState(""),
     [parameters, setParameters] = useState(""),
+    [namedBody, setNamedBody] = useState<Record<string, string>>({}),
     [tags, setTags] = useState(""),
     [contacts, setContacts] = useState<any[]>([]),
     [assignee, setAssignee] = useState(""),
@@ -22,6 +24,8 @@ export default function InboxView({ organization }: { organization: string }) {
     [offset, setOffset] = useState(0),
     [total, setTotal] = useState(0),
     [info, setInfo] = useState(""),
+    [liveRevision, setLiveRevision] = useState(""),
+    [liveState, setLiveState] = useState("Conectando atualizacoes…"),
     [catalogs, setCatalogs] = useState<{
       identities: any[];
       accounts: any[];
@@ -32,17 +36,23 @@ export default function InboxView({ organization }: { organization: string }) {
       enabled: false,
       after_minutes: 30,
       assigned_to: "",
+      execution_user_id: "",
     }),
     [headerValue, setHeaderValue] = useState(""),
     [headerFilename, setHeaderFilename] = useState(""),
     [buttonValues, setButtonValues] = useState<Record<number, string>>({}),
     [refresh, setRefresh] = useState(0),
     [busy, setBusy] = useState(false);
+  const listScope = useRef("");
   useEffect(() => {
     let active = true;
-    setConversations([]);
-    setSelected(undefined);
-    setContext(undefined);
+    const scope = JSON.stringify([organization, status, filterQuery, offset]);
+    if (listScope.current !== scope) {
+      listScope.current = scope;
+      setConversations([]);
+      setSelected(undefined);
+      setContext(undefined);
+    }
     const fetchConversations = () =>
       api(
         `/inbox/conversations?status=${status}&limit=50&offset=${offset}${filterQuery ? `&${filterQuery}` : ""}`,
@@ -58,19 +68,111 @@ export default function InboxView({ organization }: { organization: string }) {
           if (active) setError(e.message);
         });
     void fetchConversations();
-    const timer = setInterval(() => {
-      void fetchConversations();
-      if (active) setRefresh((v) => v + 1);
-    }, 10000);
     return () => {
       active = false;
-      clearInterval(timer);
     };
-  }, [organization, status, filterQuery, offset]);
+  }, [organization, status, filterQuery, offset, liveRevision]);
+  useEffect(() => {
+    const controller = new AbortController();
+    let cursor = "",
+      retry = 1000;
+    setLiveRevision("");
+    setLiveState("Conectando atualizacoes…");
+    async function connect() {
+      while (!controller.signal.aborted) {
+        try {
+          let token = getSimpleToken();
+          if (!token) {
+            const { data } = await authClient().auth.getSession();
+            token = data.session?.access_token || "";
+          }
+          const response = await fetch(
+            `${process.env.NEXT_PUBLIC_API_URL || "/api/v1"}/inbox/events`,
+            {
+              headers: {
+                Authorization: `Bearer ${token}`,
+                "X-Organization-Id": organization,
+                ...(cursor ? { "Last-Event-ID": cursor } : {}),
+              },
+              cache: "no-store",
+              signal: controller.signal,
+            },
+          );
+          if (!response.ok || !response.body)
+            throw new Error("Stream indisponivel");
+          setLiveState("Atualizacoes conectadas");
+          retry = 1000;
+          const reader = response.body.getReader(),
+            decoder = new TextDecoder();
+          let buffer = "";
+          try {
+            while (!controller.signal.aborted) {
+              const part = await reader.read();
+              if (part.done) break;
+              buffer += decoder.decode(part.value, { stream: true });
+              const frames = buffer.split(/\r?\n\r?\n/);
+              buffer = frames.pop() || "";
+              for (const frame of frames) {
+                const lines = frame.split(/\r?\n/),
+                  event = lines
+                    .find((line) => line.startsWith("event:"))
+                    ?.slice(6)
+                    .trim(),
+                  id = lines
+                    .find((line) => line.startsWith("id:"))
+                    ?.slice(3)
+                    .trim();
+                if (event === "access.revoked") {
+                  setLiveState("Acesso revogado; reconecte sua sessao");
+                  controller.abort();
+                  break;
+                }
+                if (
+                  event === "inbox.changed" &&
+                  id &&
+                  /^[a-f0-9]{64}$/.test(id)
+                ) {
+                  cursor = id;
+                  setLiveRevision(id);
+                  setRefresh((value) => value + 1);
+                }
+              }
+            }
+          } finally {
+            await reader.cancel().catch(() => {});
+            reader.releaseLock();
+          }
+        } catch {
+          if (!controller.signal.aborted)
+            setLiveState("Reconectando atualizacoes…");
+        }
+        if (!controller.signal.aborted)
+          await new Promise<void>((resolve) => {
+            const timer = setTimeout(resolve, retry);
+            controller.signal.addEventListener(
+              "abort",
+              () => {
+                clearTimeout(timer);
+                resolve();
+              },
+              { once: true },
+            );
+          });
+        retry = Math.min(retry * 2, 10000);
+      }
+    }
+    void connect();
+    return () => controller.abort();
+  }, [organization]);
   useEffect(() => {
     let active = true;
     setCatalogs({ identities: [], accounts: [], contacts: [], team: [] });
-    setEscalation({ enabled: false, after_minutes: 30, assigned_to: "" });
+    setEscalation({
+      enabled: false,
+      after_minutes: 30,
+      assigned_to: "",
+      execution_user_id: "",
+    });
     api("/settings/inbox-escalation", organization)
       .then((policy) => {
         if (active)
@@ -78,6 +180,7 @@ export default function InboxView({ organization }: { organization: string }) {
             enabled: Boolean(policy.enabled),
             after_minutes: policy.after_minutes ?? 30,
             assigned_to: policy.assigned_to || "",
+            execution_user_id: policy.execution_user_id || "",
           });
       })
       .catch((error) => {
@@ -142,6 +245,15 @@ export default function InboxView({ organization }: { organization: string }) {
       ),
     ),
   ].sort((a, b) => a - b);
+  const bodyNames = [
+    ...new Set(
+      [
+        ...String(bodyDefinition?.text || "").matchAll(
+          /\{\{([a-z][a-z0-9_]{0,63})\}\}/g,
+        ),
+      ].map((match) => match[1]),
+    ),
+  ];
   const headerDefinition = templateDefinitions.find(
     (item: any) => item.type === "HEADER",
   );
@@ -152,11 +264,15 @@ export default function InboxView({ organization }: { organization: string }) {
   const buttons =
     templateDefinitions.find((item: any) => item.type === "BUTTONS")?.buttons ||
     [];
-  const unsupportedTemplate = templateDefinitions.some(
-    (item: any) =>
-      !["BODY", "HEADER", "FOOTER", "BUTTONS"].includes(item.type) ||
-      /\{\{[^0-9]/.test(item.text || ""),
-  );
+  const unsupportedTemplate =
+    templateDefinitions.some(
+      (item: any) =>
+        !["BODY", "HEADER", "FOOTER", "BUTTONS"].includes(item.type) ||
+        [...String(item.text || "").matchAll(/\{\{([^{}]+)\}\}/g)].some(
+          (match) => !/^(\d+|[a-z][a-z0-9_]{0,63})$/.test(match[1]),
+        ),
+    ) ||
+    (!!bodyNames.length && !!bodyPositions.length);
   const team = context?.team || catalogs.team;
   async function adminAction(path: string, body: any, message: string) {
     setBusy(true);
@@ -189,6 +305,7 @@ export default function InboxView({ organization }: { organization: string }) {
     <section>
       {error && <ErrorBanner error={error} />}
       {info && <p role="status">{info}</p>}
+      <p role="status">{liveState}</p>
       <details className="panel">
         <summary>Filtrar conversas</summary>
         <form
@@ -350,6 +467,9 @@ export default function InboxView({ organization }: { organization: string }) {
                 enabled: form.get("enabled") === "on",
                 after_minutes: Number(form.get("after_minutes")),
                 assigned_to: form.get("assigned_to"),
+                ...(form.get("execution_user_id")
+                  ? { execution_user_id: form.get("execution_user_id") }
+                  : {}),
               },
               "Política de escalonamento salva.",
             );
@@ -409,6 +529,32 @@ export default function InboxView({ organization }: { organization: string }) {
               ))}
             </select>
           </label>
+          <label>
+            Executor automatico restrito
+            <select
+              name="execution_user_id"
+              value={escalation.execution_user_id}
+              onChange={(event) =>
+                setEscalation((current) => ({
+                  ...current,
+                  execution_user_id: event.target.value,
+                }))
+              }
+            >
+              <option value="">Somente processamento manual</option>
+              {team.map((member: any) => (
+                <option key={member.user_id} value={member.user_id}>
+                  {member.display_name ||
+                    member.invitation_email ||
+                    member.user_id.slice(0, 8)}
+                </option>
+              ))}
+            </select>
+            <small>
+              Usuario real com papel de atendimento e sem privilegios
+              administrativos. Escopos sao revalidados em cada execucao.
+            </small>
+          </label>
           <button disabled={busy}>Salvar política com MFA</button>
           <button
             type="button"
@@ -426,10 +572,10 @@ export default function InboxView({ organization }: { organization: string }) {
           </button>
         </form>
         <small>
-          O processamento automático depende do agendamento autenticado no
-          ambiente.
+          O worker verifica os prazos periodicamente com o executor selecionado.
         </small>
       </details>
+      <RetentionPanel organization={organization} />
       <div className="inbox-grid">
         <aside className="panel inbox-list">
           <h2>Conversas</h2>
@@ -456,6 +602,7 @@ export default function InboxView({ organization }: { organization: string }) {
                 setHeaderFilename("");
                 setButtonValues({});
                 setParameters("");
+                setNamedBody({});
                 setInfo("");
                 setTags((c.tags || []).join(", "));
                 setMessages([]);
@@ -536,10 +683,21 @@ export default function InboxView({ organization }: { organization: string }) {
                         ...(template
                           ? {
                               template_id: template,
-                              template_parameters: parameters
-                                ? parameters.split("\n")
-                                : [],
+                              template_parameters:
+                                !bodyNames.length && parameters
+                                  ? parameters.split("\n")
+                                  : [],
                               template_components: {
+                                ...(bodyNames.length
+                                  ? {
+                                      named_body: Object.fromEntries(
+                                        bodyNames.map((name) => [
+                                          name,
+                                          namedBody[name] || "",
+                                        ]),
+                                      ),
+                                    }
+                                  : {}),
                                 ...(dynamicHeader
                                   ? {
                                       header:
@@ -625,6 +783,7 @@ export default function InboxView({ organization }: { organization: string }) {
                         onChange={(e) => {
                           setTemplate(e.target.value);
                           setParameters("");
+                          setNamedBody({});
                           setHeaderValue("");
                           setHeaderFilename("");
                           setButtonValues({});
@@ -656,12 +815,33 @@ export default function InboxView({ organization }: { organization: string }) {
                         Variável BODY {position}
                         <input
                           required
+                          maxLength={
+                            templateDefinitions.length === 1 ? 32768 : 1024
+                          }
                           value={parameters.split("\n")[position - 1] || ""}
                           onChange={(event) => {
                             const next = parameters.split("\n");
                             next[position - 1] = event.target.value;
                             setParameters(next.join("\n"));
                           }}
+                        />
+                      </label>
+                    ))}
+                    {bodyNames.map((name) => (
+                      <label key={name}>
+                        Variável BODY {name}
+                        <input
+                          required
+                          maxLength={
+                            templateDefinitions.length === 1 ? 32768 : 1024
+                          }
+                          value={namedBody[name] || ""}
+                          onChange={(event) =>
+                            setNamedBody((current) => ({
+                              ...current,
+                              [name]: event.target.value,
+                            }))
+                          }
                         />
                       </label>
                     ))}
@@ -711,7 +891,7 @@ export default function InboxView({ organization }: { organization: string }) {
                             : "valor de retorno"}
                           <input
                             required
-                            maxLength={2048}
+                            maxLength={button.type === "URL" ? 2000 : 128}
                             value={buttonValues[index] || ""}
                             onChange={(event) =>
                               setButtonValues((current) => ({
@@ -724,6 +904,7 @@ export default function InboxView({ organization }: { organization: string }) {
                       ) : null,
                     )}
                     {!bodyPositions.length &&
+                      !bodyNames.length &&
                       !dynamicHeader &&
                       !buttons.length && (
                         <p>Este template não recebe variáveis.</p>

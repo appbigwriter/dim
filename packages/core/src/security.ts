@@ -84,7 +84,7 @@ export async function resource(
   if (!/^[a-z_]+$/.test(table)) throw new Error("Invalid resource");
   const row = await one(
     db,
-    `SELECT * FROM custom_dim.${table} WHERE id=$1 AND organization_id=$2`,
+    `SELECT * FROM custom_dim.${table} WHERE id=$1 AND organization_id=$2${table === "storage_objects" ? " FOR KEY SHARE" : ""}`,
     [id, actor.organizationId],
   );
   if (!row) throw new AppError(404, "NOT_FOUND", "Recurso não encontrado");
@@ -143,6 +143,6 @@ export async function event(
     aggregate_id: id,
     correlation_id: actor.correlationId,
     payload_version: 1,
-    payload: { ...payload, requested_by: actor.userId },
+    payload: { ...payload, requested_by: actor.userId, requested_aal: actor.aal },
   });
 }

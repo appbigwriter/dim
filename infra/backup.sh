@@ -7,6 +7,7 @@ umask 077
 mkdir -p "$BACKUP_WORKDIR"
 pg_dump --schema=custom_dim --format=custom --file="$BACKUP_WORKDIR/custom_dim.dump"
 rclone sync "$DIM_STORAGE_SOURCE" "$BACKUP_WORKDIR/storage" --checksum
+(cd "$BACKUP_WORKDIR" && find storage -type f -exec sha256sum '{}' \; > storage.sha256 && sha256sum custom_dim.dump > database.sha256)
 date -u +%Y-%m-%dT%H:%M:%SZ > "$BACKUP_WORKDIR/completed_at"
 restic backup "$BACKUP_WORKDIR" --tag dim --tag "${APP_ENV:?}"
 restic check

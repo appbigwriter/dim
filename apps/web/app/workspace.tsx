@@ -1,5 +1,6 @@
 "use client";
 import AudiencePanel from "./audience-panel";
+import AccountConnect from "./account-connect";
 import IdentityProfile from "./identity-profile";
 import ContentComparison from "./content-comparison";
 import ChannelCoverage from "./channel-coverage";
@@ -118,37 +119,48 @@ const subtitles: Record<string, string> = {
     "Titularidade, contratos e autorizações para operar com segurança.",
 };
 function Login({ onSession }: { onSession: () => void }) {
-  const [email, setEmail] = useState("admin@fbr.news"),
-    [password, setPassword] = useState("admin123"),
+  const [email, setEmail] = useState(""),
+    [password, setPassword] = useState(""),
     [code, setCode] = useState(""),
     [factor, setFactor] = useState(""),
     [qr, setQr] = useState(""),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false);
+  function completeLogin() {
+    onSession();
+    if (location.pathname === "/login") location.assign("/dashboard");
+  }
 
   async function handleLogin(targetEmail?: string, targetPassword?: string) {
     setBusy(true);
     setError("");
-    const em = (targetEmail || email || "admin@fbr.news").trim();
-    const pw = targetPassword || password || "admin123";
+    const em = (targetEmail || email).trim();
+    const pw = targetPassword || password;
 
     try {
       const res = await fetch("/api/v1/auth/simple-login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: em, password: pw }),
-      });
+      }).catch(() => null);
 
-      if (res.ok) {
+      if (res?.ok) {
         const data = await res.json();
         if (data.token) {
           setSimpleToken(data.token);
           if (data.organizations?.[0]?.id) {
             localStorage.setItem("dim.organization", data.organizations[0].id);
           }
-          onSession();
+          completeLogin();
           return;
         }
+      } else if (res && res.status === 401) {
+        const errJson = await res.json().catch(() => null);
+        throw new Error(errJson?.message || "Credenciais inválidas");
+      } else if (res && res.status === 503) {
+        throw new Error(
+          "A API interna ainda está inicializando na VPS. Aguarde alguns instantes e tente novamente.",
+        );
       }
 
       const client = authClient();
@@ -158,7 +170,7 @@ function Login({ onSession }: { onSession: () => void }) {
           code,
         });
         if (result.error) throw result.error;
-        onSession();
+        completeLogin();
         return;
       }
       const result = await client.auth.signInWithPassword({
@@ -172,7 +184,7 @@ function Login({ onSession }: { onSession: () => void }) {
         setFactor(totp.id);
         return;
       }
-      onSession();
+      completeLogin();
     } catch (e) {
       setError((e as Error).message || "Falha na autenticação");
     } finally {
@@ -280,20 +292,9 @@ function Login({ onSession }: { onSession: () => void }) {
                 ? "Confirmar segundo fator"
                 : "Entrar no espaço →"}
           </button>
-          {!factor && (
-            <button
-              type="button"
-              className="secondary"
-              style={{ marginTop: "0.5rem" }}
-              disabled={busy}
-              onClick={() => void handleLogin("admin@fbr.news", "admin123")}
-            >
-              ⚡ Acesso Rápido (Administrador)
-            </button>
-          )}
         </form>
         <button className="text-button" onClick={enroll}>
-          Configurar MFA opcional
+          Configurar MFA
         </button>
         <small>Administradores precisam de autenticação em dois fatores.</small>
         <footer>
@@ -324,6 +325,7 @@ function Detail({
     [when, setWhen] = useState(""),
     [account, setAccount] = useState(""),
     [accounts, setAccounts] = useState<any[]>([]),
+    [health, setHealth] = useState<any>(),
     [chosen, setChosen] = useState("");
   const endpoint =
     kind === "influencers"
@@ -356,6 +358,8 @@ function Detail({
                 : `/conversations/${id}/messages`;
         const rows = await api(path, organization);
         if (!valid) return;
+        if (kind === "accounts")
+          setItem({ ...detail, provider: rows.provider });
         setData(rows.data || [rows]);
         if (kind === "contents") {
           setChosen(rows.data?.[0]?.id || "");
@@ -424,6 +428,11 @@ function Detail({
                 ))}
               </nav>
               <div className="command-row">
+                <JsonCommand
+                  title="Executar checklist ou auditoria"
+                  initial={{ workflow: "identity.audit", subject_id: id }}
+                  submit={(data) => command("/workflows", data)}
+                />
                 {item.persona_source === "legacy_local" && (
                   <>
                     <JsonCommand
@@ -501,6 +510,23 @@ function Detail({
                   submit={(data) => command(`/contents/${id}/versions`, data)}
                 />
                 <JsonCommand
+                  title="Conferir alegações e evidências"
+                  initial={{
+                    claims: [
+                      {
+                        claim: "",
+                        sourceUrl: "https://",
+                        quote: "",
+                        decision: "supported",
+                        reason: "",
+                      },
+                    ],
+                  }}
+                  submit={(value) =>
+                    command(`/content-versions/${chosen}/fact-review`, value)
+                  }
+                />
+                <JsonCommand
                   title="Aprovar / solicitar alteração"
                   initial={{
                     content_version_id: chosen,
@@ -570,27 +596,52 @@ function Detail({
             </>
           )}
           {kind === "accounts" && (
-            <button
-              className="secondary"
-              onClick={async () => {
-                try {
-                  const result = await command(`/accounts/${id}/oauth`, {});
-                  location.assign(result.authorization_url);
-                } catch (e) {
-                  setError((e as Error).message);
-                }
-              }}
-            >
-              Autorizar X com OAuth
-            </button>
+            <AccountConnect
+              organization={organization}
+              accountId={id}
+              provider={
+                item.platform_code ||
+                item.provider ||
+                accounts.find((a) => a.id === id)?.platform_code ||
+                ""
+              }
+              onConnected={() => setRefresh((v) => v + 1)}
+            />
           )}
           {kind === "accounts" && (
-            <JsonCommand
-              title="Conectar bot Telegram via cofre"
-              initial={{ secret_ref: "" }}
-              submit={(data) => command(`/accounts/${id}/connect`, data)}
-            />
-          )}{" "}
+            <section className="panel">
+              <button
+                className="secondary"
+                onClick={async () => {
+                  try {
+                    const result = await api(
+                      `/accounts/${id}/health`,
+                      organization,
+                    );
+                    setHealth({ account_id: id, result });
+                    setRefresh((v) => v + 1);
+                  } catch (e) {
+                    setError((e as Error).message);
+                  }
+                }}
+              >
+                Verificar conexão e capacidades
+              </button>
+              {health?.account_id === id && (
+                <pre>{JSON.stringify(health.result, null, 2)}</pre>
+              )}
+            </section>
+          )}
+          {kind === "accounts" &&
+            ["telegram", "whatsapp", "cms", "email"].includes(
+              item.provider,
+            ) && (
+              <JsonCommand
+                title={`Conectar ${item.provider} pelo cofre`}
+                initial={{ secret_ref: "" }}
+                submit={(data) => command(`/accounts/${id}/connect`, data)}
+              />
+            )}{" "}
           {kind === "conversations" && (
             <>
               <form
@@ -1270,19 +1321,58 @@ export default function Workspace({ path }: { path: string }) {
                   />
                 </>
               )}
-              {key === "policies" && (
+              {key === "contacts" && (
                 <JsonCommand
-                  title="Criar versão da política editorial"
+                  title="Conferir titularidade do e-mail com documento"
                   initial={{
-                    code: "editorial",
-                    resource_type: "content",
-                    conditions: {},
-                    steps: ["human_review"],
+                    contact_id: "",
+                    contact_identity_id: "",
+                    influencer_id: "",
+                    email: "",
+                    proof_object_id: "",
+                    reason: "",
+                    ownership_confirmed: false,
                   }}
-                  submit={(value) =>
-                    api("/security/policy", org, "POST", value)
+                  submit={({ contact_id, ...value }) =>
+                    api(
+                      `/contacts/${contact_id}/email/verify`,
+                      org,
+                      "POST",
+                      value,
+                    )
                   }
                 />
+              )}
+              {key === "policies" && (
+                <>
+                  <JsonCommand
+                    title="Fontes e regras de risco"
+                    initial={{
+                      allowedSourceDomains: [],
+                      blockedTerms: [],
+                      requiredPhrases: [],
+                      requireSourceEvidence: true,
+                      requireFactualReview: true,
+                      maxEvidenceAgeHours: 168,
+                      requiredApprovals: 1,
+                    }}
+                    submit={(value) =>
+                      api("/settings/risk-policy", org, "POST", value)
+                    }
+                  />
+                  <JsonCommand
+                    title="Criar versão da política editorial"
+                    initial={{
+                      code: "editorial",
+                      resource_type: "content",
+                      conditions: {},
+                      steps: ["human_review"],
+                    }}
+                    submit={(value) =>
+                      api("/security/policy", org, "POST", value)
+                    }
+                  />
+                </>
               )}
               {key === "agent-runs" && (
                 <JsonCommand

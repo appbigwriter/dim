@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { demand, uuid } from "./index";
 import { canonicalHash, type AudienceBindingInput } from "./audience";
+import { templateComponentInput } from "../../connectors/src/templates";
 
 const id = z.string().min(1).max(180);
 const digest = z.string().regex(/^sha256:[a-f0-9]{64}$/);
@@ -13,7 +14,7 @@ export const audienceAction = z
     personaId: id,
     contextVersion: z.number().int().positive(),
     contextHash: digest,
-    kind: z.literal("publication"),
+    kind: z.enum(["publication", "message", "crm_update"]),
     channel: z.enum([
       "blog",
       "instagram",
@@ -25,7 +26,34 @@ export const audienceAction = z
       "youtube",
       "crm",
     ]),
-    targetAccountId: uuid,
+    targetAccountId: uuid.optional(),
+    message: z
+      .object({
+        conversationId: uuid,
+        purpose: z.enum(["service", "marketing"]),
+        templateId: uuid.optional(),
+        templateParameters: z
+          .array(z.string().min(1).max(4096))
+          .max(30)
+          .optional(),
+        templateComponents: templateComponentInput.optional(),
+      })
+      .strict()
+      .optional(),
+    crm: z
+      .object({
+        contactId: uuid,
+        patch: z
+          .object({
+            displayName: z.string().min(1).max(200).optional(),
+            locale: z.enum(["pt-BR", "en", "es"]).optional(),
+            relationshipStatus: z.enum(["active", "inactive"]).optional(),
+          })
+          .strict()
+          .refine((p) => Object.keys(p).length > 0),
+      })
+      .strict()
+      .optional(),
     scheduledAt: z.iso.datetime({ offset: true }),
     content: z
       .object({
@@ -71,6 +99,22 @@ export function validateAudienceAction(
   now = Date.now(),
 ) {
   const action = audienceAction.parse(input);
+  demand(
+    action.kind === "crm_update"
+      ? action.channel === "crm" && !!action.crm && !action.message
+      : !!action.targetAccountId &&
+          (action.kind === "message"
+            ? ["telegram", "whatsapp", "email"].includes(action.channel) &&
+              !!action.message &&
+              !action.crm &&
+              (action.channel !== "email" || !!action.content.title)
+            : !action.message &&
+              !action.crm &&
+              !["whatsapp", "email", "crm"].includes(action.channel)),
+    "AUDIENCE_ACTION_KIND",
+    "Destino e parâmetros não correspondem ao tipo de ação",
+    422,
+  );
   demand(
     action.channel !== "youtube" ||
       !!(
@@ -129,6 +173,26 @@ export const audienceReceipt = z
       .string()
       .regex(/^[A-Z0-9_]+$/)
       .max(120)
+      .optional(),
+    evidenceUrls: z
+      .array(z.url({ protocol: /^https$/ }))
+      .max(20)
+      .optional(),
+    metrics: z
+      .record(
+        z.string().regex(/^[a-zA-Z0-9_]+$/),
+        z.number().finite().nonnegative(),
+      )
+      .refine((v) => Object.keys(v).length <= 50)
+      .optional(),
+    metricsProvenance: z.string().min(1).max(200).optional(),
+    metricsObservedAt: z.iso.datetime({ offset: true }).optional(),
+    cost: z
+      .object({
+        amount: z.string().regex(/^\d{1,12}(\.\d{1,6})?$/),
+        currency: z.string().regex(/^[A-Z]{3}$/),
+      })
+      .strict()
       .optional(),
   })
   .strict();

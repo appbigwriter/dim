@@ -2,6 +2,14 @@ import type { AudienceProvider } from "../../../packages/connectors/src/audience
 import type { AudienceActions } from "../../../packages/connectors/src/audience-actions";
 import { audienceRoutes } from "./audience-routes";
 import { emailRoutes } from "./email-routes";
+import { emailWebhookRoutes } from "./email-webhook-routes";
+import { factualRoutes } from "./factual-routes";
+import { workflowRoutes } from "./workflow-routes";
+import { oauthRoutes } from "./oauth-routes";
+import { registerInboxRealtime } from "./inbox-realtime-routes";
+import { registerRetentionRoutes } from "./retention-routes";
+import type { OAuthProvidersConfig } from "../../../packages/connectors/src/oauth-multichannel";
+import type { ErasureProvider } from "../../../packages/core/src/retention";
 import { ResendEmail } from "../../../packages/connectors/src/email";
 import {
   channelConnector,
@@ -44,6 +52,7 @@ import { accessCommand } from "../../../packages/core/src/access";
 import {
   createSimpleToken,
   ensureAdminUserAndOrg,
+  simpleAuthEnabled,
 } from "../../../packages/core/src/simple-auth";
 import {
   resources,
@@ -108,6 +117,8 @@ type Options = {
   audience?: AudienceProvider;
   audienceActions?: AudienceActions;
   vault?: Vault;
+  oauth?: OAuthProvidersConfig;
+  erasure?: ErasureProvider;
   storage?: PrivateStorage;
   scan?: (data: Buffer) => Promise<void>;
   dependencies?: () => Promise<any>;
@@ -374,44 +385,43 @@ export async function buildApp(opts: Options) {
     return { ...session, organizations };
   });
   app.post("/api/v1/auth/simple-login", async (req) => {
+    demand(
+      simpleAuthEnabled(),
+      "LOCAL_AUTH_DISABLED",
+      "Acesso local desativado",
+      404,
+    );
     const body = z
       .object({
         email: z.string().email(),
-        password: z.string().optional(),
+        password: z.string().min(12),
       })
       .parse(req.body);
 
     const configuredPassword = process.env.ADMIN_PASSWORD;
-    if (
+    demand(
       configuredPassword &&
-      body.password &&
-      body.password !== configuredPassword
-    ) {
-      demand(false, "INVALID_CREDENTIALS", "Senha incorreta", 401);
-    }
-
-    let userId =
-      process.env.ADMIN_USER_ID ||
-      process.env.BOOTSTRAP_USER_ID ||
-      "b69b2949-f6be-4f86-9265-c0d561d5b0b0";
-    try {
-      const existingUser = await one(
-        opts.db,
-        "SELECT id FROM auth.users WHERE email = $1 LIMIT 1",
-        [body.email],
-      );
-      if (existingUser?.id) userId = existingUser.id;
-    } catch {}
+        configuredPassword.length >= 12 &&
+        sameSecret(body.password, configuredPassword) &&
+        body.email === process.env.ADMIN_EMAIL,
+      "INVALID_CREDENTIALS",
+      "Credenciais locais inválidas",
+      401,
+    );
+    const userId = uuid.parse(process.env.ADMIN_USER_ID);
 
     const organizations = await ensureAdminUserAndOrg(
       opts.db,
       userId,
       body.email,
-      process.env.BOOTSTRAP_ORG_NAME || "FBR Digital",
-      process.env.BOOTSTRAP_ORG_SLUG || "fbr-digital",
     );
 
-    const token = await createSimpleToken(userId, body.email);
+    const sessionId = randomUUID();
+    await opts.db.query(
+      "INSERT INTO auth.sessions(id,user_id,not_after) VALUES($1,$2,now()+interval '1 hour')",
+      [sessionId, userId],
+    );
+    const token = await createSimpleToken(userId, body.email, sessionId);
 
     return {
       token,
@@ -429,7 +439,6 @@ export async function buildApp(opts: Options) {
       "Serviço não autenticado",
       401,
     );
-    demand(opts.vault, "VAULT_UNAVAILABLE", "Cofre necessário", 503);
     const input = z.object({ operation_id: uuid }).strict().parse(req.body);
     return executeAutomation(opts.db, input.operation_id, opts.vault);
   });
@@ -1141,7 +1150,7 @@ export async function buildApp(opts: Options) {
       ).rows,
       templates: (
         await db.query(
-          "SELECT id,provider_template_id,language,category,content->'components' AS components FROM custom_dim.message_templates WHERE organization_id=$1 AND approval_status='approved' AND content->>'social_account_id'=$2",
+          "SELECT id,provider_template_id,language,category,content->'components' AS components,content->>'parameter_format' AS parameter_format FROM custom_dim.message_templates WHERE organization_id=$1 AND approval_status='approved' AND content->>'social_account_id'=$2",
           [a.organizationId, c.social_account_id],
         )
       ).rows,
@@ -1253,8 +1262,10 @@ export async function buildApp(opts: Options) {
         "content.generate",
         "content.verify",
         "inbox.triage",
+        "campaign.analyze",
       ]),
       content_id: uuid,
+      conversation_id: uuid.optional(),
       input: text,
     }),
     async (db, a, r) => {
@@ -1560,6 +1571,7 @@ export async function buildApp(opts: Options) {
           category: template.category,
           content: {
             components: template.components,
+            parameter_format: template.parameter_format,
             provider_id: template.id,
             social_account_id: account.id,
             synced_at: new Date().toISOString(),
@@ -1591,6 +1603,11 @@ export async function buildApp(opts: Options) {
       accountId: account.id,
     });
     return {
+      provider: (
+        await one(db, "SELECT code FROM custom_dim.platforms WHERE id=$1", [
+          account.platform_id,
+        ])
+      )?.code,
       data: (
         await db.query(
           "SELECT capability_code,available,checked_at,restriction_reason FROM custom_dim.account_capabilities WHERE social_account_id=$1",
@@ -1700,6 +1717,12 @@ export async function buildApp(opts: Options) {
   completionRoutes(app, route, opts, auth);
   audienceRoutes(app, route, opts, auth);
   emailRoutes(route);
+  factualRoutes(app, opts, auth);
+  workflowRoutes(route);
+  emailWebhookRoutes(app, route, opts);
+  oauthRoutes(app, route, opts, auth);
+  registerInboxRealtime(app, { db: opts.db }, auth);
+  registerRetentionRoutes(app, route, opts, auth);
   await app.ready();
   return app;
 }

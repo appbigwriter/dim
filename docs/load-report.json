@@ -1,39 +1,39 @@
 {
-  "executed_at": "2026-10-24T22:40:14.156Z",
+  "executed_at": "2026-10-26T10:00:12.645Z",
   "environment": "Local PGlite + Fastify injection, sequential HTTP simulation; not a VPS/Supabase/Redis capacity benchmark",
   "results": [
     {
       "influencers": 10,
       "requests": 120,
       "concurrency": 1,
-      "seed_ms": 115.8,
-      "p50_ms": 2.81,
-      "p95_ms": 3.81,
-      "max_ms": 29.61,
+      "seed_ms": 132.3,
+      "p50_ms": 3.15,
+      "p95_ms": 4.62,
+      "max_ms": 25.93,
       "errors": 0,
-      "correlation_example": "76f50e18-9e89-406d-956e-e1203f20baf3"
+      "correlation_example": "b760c2bd-6098-4a77-b427-89339c9f5d2a"
     },
     {
       "influencers": 50,
       "requests": 120,
       "concurrency": 1,
-      "seed_ms": 484.2,
-      "p50_ms": 3.54,
-      "p95_ms": 4.57,
-      "max_ms": 5.58,
+      "seed_ms": 1394.5,
+      "p50_ms": 4.49,
+      "p95_ms": 8.31,
+      "max_ms": 24.83,
       "errors": 0,
-      "correlation_example": "1e7550ce-41ba-405a-b809-05cb2c9770d8"
+      "correlation_example": "eec3f3dc-b9bd-4b9c-b948-7374504d5b96"
     },
     {
       "influencers": 100,
       "requests": 120,
       "concurrency": 1,
-      "seed_ms": 995.7,
-      "p50_ms": 3.63,
-      "p95_ms": 5.2,
-      "max_ms": 6.25,
+      "seed_ms": 1147.4,
+      "p50_ms": 6.01,
+      "p95_ms": 11.01,
+      "max_ms": 38.59,
       "errors": 0,
-      "correlation_example": "aaf43ac9-d85e-4068-bc49-1926735c6f12"
+      "correlation_example": "e1778653-68ee-4c31-bf93-8576c67dc0cb"
     }
   ]
 }

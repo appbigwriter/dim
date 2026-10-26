@@ -7,6 +7,7 @@ import { audit, authorize, member } from "./security";
 export const rolePermissions: Record<string, string[]> = {
   admin: ["*"],
   audience_executor: [
+    "inbox.read", "inbox.write",
     "identity.read",
     "governance.read",
     "audience.sync",

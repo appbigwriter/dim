@@ -4,7 +4,11 @@ import { randomUUID } from "node:crypto";
 import { fixture } from "./helpers";
 import { insert, one } from "../packages/db/src/index";
 import { hash, scoped } from "../packages/core/src/security";
-import { queueEmailReply, sendEmailReply } from "../packages/core/src/email";
+import {
+  queueEmailReply,
+  sendEmailReply,
+  reviewEmailIdentity,
+} from "../packages/core/src/email";
 import { ResendEmail } from "../packages/connectors/src/email";
 import { ProviderFailure, type Vault } from "../packages/connectors/src/index";
 const domainId = "11111111-1111-4111-8111-111111111111";
@@ -30,6 +34,80 @@ const health = {
 function res(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status });
 }
+
+test("manual email ownership review requires MFA, scoped clean proof and preserves proof without granting marketing consent", async () => {
+  const f = await emailFixture();
+  try {
+    await f.db.query(
+      "UPDATE custom_dim.contact_identities SET verification_status='unverified' WHERE id=$1",
+      [f.recipient.id],
+    );
+    const proof = await insert(f.db, "storage_objects", {
+      organization_id: f.org.id,
+      influencer_id: f.identity.id,
+      bucket: "dim-private",
+      object_path: `${f.org.id}/${f.identity.id}/proof.pdf`,
+      scan_status: "clean",
+    });
+    const input = {
+      contact_identity_id: f.recipient.id,
+      influencer_id: f.identity.id,
+      email: recipientAddress,
+      proof_object_id: proof.id,
+      reason: "Documento de titularidade conferido pelo responsável",
+      ownership_confirmed: true,
+    };
+    await assert.rejects(() =>
+      scoped(f.db, f.editActor, (tx) =>
+        reviewEmailIdentity(tx, f.editActor, f.contact.id, input),
+      ),
+    );
+    await assert.rejects(
+      () =>
+        scoped(f.db, f.actor, (tx) =>
+          reviewEmailIdentity(tx, f.actor, f.contact.id, {
+            ...input,
+            email: "wrong@example.net",
+          }),
+        ),
+      /corresponde/,
+    );
+    const result = await scoped(f.db, f.actor, (tx) =>
+      reviewEmailIdentity(tx, f.actor, f.contact.id, input),
+    );
+    assert.deepEqual(result, {
+      verified: true,
+      method: "manual_document_review",
+      marketing_consent_granted: false,
+    });
+    assert.equal(
+      (
+        await one(
+          f.db,
+          "SELECT verification_status FROM custom_dim.contact_identities WHERE id=$1",
+          [f.recipient.id],
+        )
+      ).verification_status,
+      "verified",
+    );
+    const evidence = await one(
+      f.db,
+      "SELECT evidence_ref FROM custom_dim.consent_records WHERE purpose='identity_verification'",
+    );
+    assert.equal(evidence.evidence_ref, proof.id);
+    assert.equal(
+      (
+        await one(
+          f.db,
+          "SELECT count(*)::int AS n FROM custom_dim.consent_records WHERE purpose='marketing'",
+        )
+      ).n,
+      1,
+    );
+  } finally {
+    await f.db.close();
+  }
+});
 async function emailFixture() {
   const f = await fixture();
   const identity = await insert(f.db, "influencers", {
@@ -314,6 +392,7 @@ test("email service needs recent incoming; deleted or relinked contacts and chan
       organization_id: f.org.id,
       conversation_id: f.conversation.id,
       direction: "incoming",
+      message_type: "email_authenticated",
       body_reference: "Help please",
     });
     assert.equal(

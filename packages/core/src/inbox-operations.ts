@@ -125,6 +125,7 @@ export const escalationPolicy = z
     enabled: z.boolean(),
     after_minutes: z.number().int().min(0).max(43200),
     assigned_to: uuid,
+    execution_user_id: uuid.optional(),
   })
   .strict();
 export async function saveEscalationPolicy(
@@ -136,6 +137,14 @@ export async function saveEscalationPolicy(
   await member(db, actor, actor.userId);
   const settings = escalationPolicy.parse(input);
   await member(db, actor, settings.assigned_to);
+  if (settings.execution_user_id) {
+    const { boundedInboxActor } = await import("./realtime");
+    await boundedInboxActor(
+      db,
+      settings.execution_user_id,
+      actor.organizationId,
+    );
+  }
   await db.query(
     "INSERT INTO custom_dim.organization_settings(organization_id,module_key,settings) VALUES($1,'inbox_escalation',$2) ON CONFLICT(organization_id,module_key) DO UPDATE SET settings=excluded.settings,version=organization_settings.version+1",
     [actor.organizationId, JSON.stringify(settings)],
@@ -151,7 +160,8 @@ export async function saveEscalationPolicy(
   return settings;
 }
 export async function escalateInbox(db: DB, actor: Actor) {
-  authorize(actor, "inbox.write");
+  const { inboxScope } = await import("./realtime");
+  const scope = inboxScope(actor, "inbox.write");
   const row = await one(
     db,
     "SELECT settings FROM custom_dim.organization_settings WHERE organization_id=$1 AND module_key='inbox_escalation'",
@@ -162,8 +172,8 @@ export async function escalateInbox(db: DB, actor: Actor) {
   await member(db, actor, policy.assigned_to);
   const conversations = (
     await db.query(
-      "SELECT * FROM custom_dim.conversations WHERE organization_id=$1 AND status='open' AND sla_due_at+($2::text||' minutes')::interval<now() ORDER BY sla_due_at LIMIT 100 FOR UPDATE SKIP LOCKED",
-      [actor.organizationId, policy.after_minutes],
+      `SELECT c.* FROM custom_dim.conversations c WHERE ${scope.sql} AND c.status='open' AND c.sla_due_at+($${scope.values.length + 1}::text||' minutes')::interval<now() ORDER BY c.sla_due_at LIMIT 100 FOR UPDATE SKIP LOCKED`,
+      [...scope.values, policy.after_minutes],
     )
   ).rows;
   let escalated = 0;

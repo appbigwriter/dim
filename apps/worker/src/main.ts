@@ -3,14 +3,21 @@ import {
   collectMetrics,
 } from "../../../packages/core/src/monitoring";
 import { templateParameters } from "../../../packages/connectors/src/templates";
+import { oauthConfigFromEnvironment } from "../../../packages/connectors/src/oauth-multichannel";
+import { refreshOAuthIntegrations } from "../../../packages/core/src/oauth";
+import { runScheduledInboxEscalations } from "../../../packages/core/src/realtime";
+import { collectAdditionalMetrics } from "../../../packages/core/src/additional-metrics";
+import { processEmailWebhook } from "../../../packages/core/src/email-webhooks";
 import { audienceActions } from "../../../packages/connectors/src/audience-actions";
 import {
   observeAudienceExecutions,
+  enrichAudienceReceipts,
   flushAudienceReceipts,
   pollAudienceActions,
 } from "../../../packages/core/src/audience-execution";
 import { audienceProvider } from "../../../packages/connectors/src/audience";
 import { sendEmailReply } from "../../../packages/core/src/email";
+import { executeAudienceOperation } from "../../../packages/core/src/audience-operations";
 import { channelConnector } from "../../../packages/connectors/src/channels";
 import { supabaseStorage } from "../../../packages/connectors/src/storage";
 import "dotenv/config";
@@ -125,7 +132,20 @@ const worker = new Worker(
     if (!claimed) return;
     try {
       let result: any;
-      if (operation.job_type === "inbox.ingest")
+      if (operation.job_type === "audience.execute")
+        return await executeAudienceOperation(
+          db,
+          operation,
+          audienceActions(vault, fetch, process.env.APP_ENV === "development"),
+          vault,
+          fetch,
+          reserveRate,
+        );
+      if (operation.job_type === "email.webhook")
+        result = await db.transaction((tx) =>
+          processEmailWebhook(tx, operation, vault),
+        );
+      else if (operation.job_type === "inbox.ingest")
         result = await db.transaction((tx) => normalizeIncoming(tx, operation));
       else if (operation.job_type === "inbox.send") {
         const actor = await loadActor(
@@ -157,8 +177,45 @@ const worker = new Worker(
             [account.id],
           );
           demand(integration, "TOKEN_REVOKED", "Conta sem autorização");
+          demand(
+            integration.secret_ref.startsWith(
+              `dim/${actor.organizationId}/${account.id}/`,
+            ),
+            "VAULT_SCOPE",
+            "Referência fora da conta",
+            403,
+          );
           const secret = await vault.get(integration.secret_ref);
           await reserveRate(provider, account.id);
+          const beforeSend = async () => {
+            const fresh = await loadActor(
+              tx,
+              actor.userId,
+              actor.organizationId,
+              actor.aal,
+              randomUUID(),
+            );
+            await messageGuard(
+              tx,
+              fresh,
+              conversation,
+              operation.payload.purpose,
+              operation.payload.template_id,
+              operation.payload.template_parameters || [],
+              operation.payload.template_components,
+            );
+            demand(
+              await one(
+                tx,
+                "SELECT i.id FROM custom_dim.account_integrations i JOIN custom_dim.social_accounts a ON a.id=i.social_account_id WHERE i.id=$1 AND i.status='active' AND i.secret_ref=$2 AND (i.expires_at IS NULL OR i.expires_at>clock_timestamp()) AND a.external_id=$3",
+                [integration.id, integration.secret_ref, account.external_id],
+              ),
+              "TOKEN_REVOKED",
+              "Autorização mudou durante o envio",
+              409,
+            );
+          };
+          if (provider === "whatsapp") await beforeSend();
           const sent =
             provider === "email"
               ? await sendEmailReply(
@@ -168,6 +225,8 @@ const worker = new Worker(
                   operation.payload,
                   operation.idempotency_key,
                   vault,
+                  fetch,
+                  beforeSend,
                 )
               : provider === "telegram"
                 ? await telegram.publish({
@@ -175,6 +234,7 @@ const worker = new Worker(
                     destination: conversation.external_thread_id,
                     text: operation.payload.text,
                     idempotencyKey: operation.idempotency_key,
+                    beforeSend,
                   })
                 : await whatsappSend(
                     secret.token,
@@ -354,9 +414,18 @@ const poll = async () => {
     await db.query(
       "UPDATE custom_dim.publication_jobs SET status='uncertain',last_error='WORKER_LEASE_EXPIRED' WHERE status='publishing' AND lease_until<now()",
     );
-    await db.query(
-      "UPDATE custom_dim.operation_jobs SET status='uncertain',last_error='WORKER_STUCK' WHERE status='running' AND updated_at<now()-interval '5 minutes'",
-    );
+    await db.transaction(async (tx) => {
+      const stuck = (
+        await tx.query(
+          "UPDATE custom_dim.operation_jobs SET status='uncertain',last_error='WORKER_STUCK' WHERE status IN('running','executing') AND updated_at<now()-interval '5 minutes' RETURNING id",
+        )
+      ).rows;
+      for (const job of stuck)
+        await tx.query(
+          "UPDATE custom_dim.agent_runs SET status='failed_reserved' WHERE input_reference=$1 AND status='running'",
+          [job.id],
+        );
+    });
     await connection.set(
       "dim:worker:heartbeat",
       new Date().toISOString(),
@@ -375,19 +444,28 @@ const monitor = async () => {
   monitoring = true;
   try {
     const outcomes = await Promise.allSettled([
+      refreshOAuthIntegrations(db, vault, oauthConfigFromEnvironment()),
+      runScheduledInboxEscalations(db),
       monitorAccounts(db, vault, undefined, !!storage?.download),
       collectMetrics(db, vault),
+      collectAdditionalMetrics(db, vault),
       pollAudienceActions(
         db,
         audienceActions(vault, fetch, process.env.APP_ENV === "development"),
         audienceProvider(vault, fetch, process.env.APP_ENV === "development"),
       ),
-      observeAudienceExecutions(db).then(() =>
-        flushAudienceReceipts(
-          db,
-          audienceActions(vault, fetch, process.env.APP_ENV === "development"),
+      observeAudienceExecutions(db)
+        .then(() => enrichAudienceReceipts(db))
+        .then(() =>
+          flushAudienceReceipts(
+            db,
+            audienceActions(
+              vault,
+              fetch,
+              process.env.APP_ENV === "development",
+            ),
+          ),
         ),
-      ),
     ]);
     if (outcomes.some((result) => result.status === "rejected"))
       console.error(JSON.stringify({ event: "monitoring_partial_failure" }));

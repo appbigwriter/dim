@@ -14,7 +14,6 @@ const names = [
   "identity.offboard",
 ];
 for (const name of names) {
-  const executable = ["content.generate", "content.verify"].includes(name);
   const nodes: any[] = [
     {
       id: "entry",
@@ -31,37 +30,25 @@ for (const name of names) {
       credentials: { httpHeaderAuth: { name: "DIM inbound service" } },
     },
   ];
-  if (executable)
-    nodes.push({
-      id: "execute",
-      name: "Execute bounded DIM operation",
-      type: "n8n-nodes-base.httpRequest",
-      typeVersion: 4.2,
-      position: [300, 0],
-      parameters: {
-        method: "POST",
-        url: '={{ $env.DIM_API_INTERNAL_URL + "/api/v1/automation/execute" }}',
-        authentication: "genericCredentialType",
-        genericAuthType: "httpHeaderAuth",
-        sendBody: true,
-        specifyBody: "json",
-        jsonBody:
-          "={{ JSON.stringify({ operation_id: $json.body.operation_id }) }}",
-        options: { timeout: 90000 },
-      },
-      credentials: { httpHeaderAuth: { name: "DIM outbound service" } },
-    });
-  else
-    nodes.push({
-      id: "handoff",
-      name: "Preserve request for human workflow",
-      type: "n8n-nodes-base.code",
-      typeVersion: 2,
-      position: [300, 0],
-      parameters: {
-        jsCode: `const command = $input.first().json.body;\nif (!command?.operation_id || !command?.organization_id) throw new Error('Invalid DIM command');\nreturn [{json: {completed:false, requires_human:true, workflow:${JSON.stringify(name)}, operation_id:command.operation_id, reason:'Configure and validate the organization-specific workflow before automation.'}}];`,
-      },
-    });
+  nodes.push({
+    id: "execute",
+    name: "Execute bounded DIM operation",
+    type: "n8n-nodes-base.httpRequest",
+    typeVersion: 4.2,
+    position: [300, 0],
+    parameters: {
+      method: "POST",
+      url: '={{ $env.DIM_API_INTERNAL_URL + "/api/v1/automation/execute" }}',
+      authentication: "genericCredentialType",
+      genericAuthType: "httpHeaderAuth",
+      sendBody: true,
+      specifyBody: "json",
+      jsonBody:
+        "={{ JSON.stringify({ operation_id: $json.body.operation_id }) }}",
+      options: { timeout: 90000 },
+    },
+    credentials: { httpHeaderAuth: { name: "DIM outbound service" } },
+  });
   writeFileSync(
     `n8n/workflows/${name}.json`,
     JSON.stringify(
@@ -87,5 +74,5 @@ for (const name of names) {
   );
 }
 console.log(
-  "12 importable workflows written; 2 execute bounded backend commands, 10 require configuration/human handling.",
+  "12 importable workflows written; each executes its authenticated, bounded backend command.",
 );

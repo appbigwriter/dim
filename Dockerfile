@@ -68,8 +68,8 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV HOST=0.0.0.0
 ENV HOSTNAME=0.0.0.0
-ENV PORT=3000
-ENV SERVICE_ROLE=web
+ENV SERVICE_ROLE=all
+ENV API_INTERNAL_URL=http://127.0.0.1:3001
 
 # Garante a estrutura do standalone do Next.js
 RUN cp -rn /app/apps/web/.next/standalone/* /app/ 2>/dev/null || true

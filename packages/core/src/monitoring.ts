@@ -159,6 +159,7 @@ export async function collectMetrics(
           value >= 0,
       );
       demand(metrics.length, "NO_METRICS", "Métricas não fornecidas");
+      const observedAt = new Date().toISOString();
       await db.transaction(async (tx) => {
         for (const [code, value] of metrics)
           await insert(tx, "publication_metrics", {
@@ -166,7 +167,7 @@ export async function collectMetrics(
             published_post_id: post.id,
             metric_code: code,
             metric_value: value,
-            observed_at: new Date().toISOString(),
+            observed_at: observedAt,
             provenance: "x_api_v2_public_metrics",
           });
         await tx.query(

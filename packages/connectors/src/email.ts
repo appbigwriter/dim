@@ -109,6 +109,52 @@ export class ResendEmail {
     );
     return { publish: false, readMessages: false, sendMessages: true };
   }
+  async receivingHealth(destination: string) {
+    demand(
+      this.config.provider === "resend" &&
+        this.config.token &&
+        /^[a-f0-9-]{36}$/i.test(this.config.domain_id || ""),
+      "EMAIL_NOT_CONFIGURED",
+      "Configure domínio e credenciais Resend",
+      503,
+    );
+    const sender = emailAddress(this.config.from_email || "");
+    demand(
+      sender === emailAddress(destination),
+      "ACCOUNT_OWNER_MISMATCH",
+      "Conta de e-mail diverge da autorização",
+      409,
+    );
+    const domain = await this.call(`/domains/${this.config.domain_id}`, "GET");
+    demand(
+      domain.id === this.config.domain_id &&
+        domain.name?.toLowerCase() === sender.split("@")[1] &&
+        domain.status === "verified" &&
+        domain.capabilities?.receiving === "enabled",
+      "EMAIL_RECEIVING_UNVERIFIED",
+      "Domínio não confirmado para recebimento",
+      409,
+    );
+    return { readMessages: true };
+  }
+  async received(id: string) {
+    demand(
+      /^[a-f0-9-]{36}$/i.test(id),
+      "EMAIL_ID_INVALID",
+      "Identificador de e-mail inválido",
+      409,
+    );
+    return this.call(`/emails/receiving/${id}?html_format=cid`, "GET");
+  }
+  async sent(id: string) {
+    demand(
+      /^[a-f0-9-]{36}$/i.test(id),
+      "EMAIL_ID_INVALID",
+      "Identificador de e-mail inválido",
+      409,
+    );
+    return this.call(`/emails/${id}`, "GET");
+  }
   async send(input: {
     destination: string;
     to: string;

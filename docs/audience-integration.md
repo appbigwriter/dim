@@ -6,7 +6,7 @@ Implementação local de 25/10/2026. Audience gere persona, estratégia, trajet�
 
 `dim.audience-context.v1` preserva o pacote real persona-intake, seu hash e IDs. Inclui tenant/projeto, versão/hash do contexto, objetivos/pilares/marcos e blogs com estado/readback. Valida escopo, aprovação, hashes, ausência de segredos e regressão/conflito. Persona e perfil estratégicos importados são somente leitura no DIM.
 
-Audience agora disponibiliza persistência JSON local com lock/escrita atômica e implementação Supabase append-only privada com migration testada localmente. Produção exige readback do pacote aprovado pelo adapter oficial Authority configurado. Importação manual sem readback só existe em local/development com flag explícita. Os endpoints legados de projeto/intake/manifest ainda não alimentam automaticamente esse read model: essa integração de domínio permanece pendente.
+Audience disponibiliza persistência JSON local com lock/escrita atômica e Supabase append-only privado. Projeto/intake/manifesto/estratégia/blog alimentam automaticamente o read model, inclusive recuperação por leitura após interrupção. Produção exige readback do pacote aprovado pelo adapter oficial Authority configurado. Importação manual sem readback só existe em local/development com flag explícita e não pode sobrescrever um contexto gerido pelo domínio.
 
 Novas identidades DIM usam Audience; antigas são legacy_local até migração explícita. Vínculos não mudam silenciosamente. Contexto alterado invalida revisão/cancela jobs pendentes; degradado ou sem confirmação há 24 horas bloqueia uso operacional.
 
@@ -57,8 +57,8 @@ Vault `dim/<organization_id>/audience-builder`: read_model_url, actions_url, tok
 
 Audience exige token de serviço/escopo, tokens e atores próprios de aprovação, configuração Authority e, para blog, allowlist/credenciais WordPress. Os nomes e exemplos completos estão em FBR Audience/03-arquitetura/integracao-dim.md e no .env.example da origem. URLs health/publish do blog incluem queries tenant/projeto/destination na configuração.
 
-DIM possui seis migrations, 79 tabelas originais mais audience_bindings, audience_context_versions, audience_execution_requests e audience_execution_receipts. RLS, tenant FKs, grants privados e imutabilidade testados localmente. Nenhuma migration remota aplicada.
+DIM possui sete migrations, 79 tabelas originais mais quatro tabelas Audience e content_verifications (84 tabelas de domínio). RLS, tenant FKs, grants privados e imutabilidade testados localmente. Nenhuma migration remota aplicada.
 
 Smoke HTTP local com servidor Next real Audience e adapters reais DIM confirmou contexto, lista/get de ação, receipt/replay, fila vazia, tenant inválido e revogação. Não houve publicação externa. QA Web local conferiu importação e link para revisão; evidência screenshots/audience-execution-local.png.
 
-Pendentes: alimentar o novo read model pelo domínio estratégico legado, provisionamento real, contratos de conversa/CRM, custos/métricas de retorno, formatos adicionais, OAuth/refresh de novos canais e homologação real. Blog segue sob gestão Audience; DIM não cria um CMS estratégico paralelo.
+Atualização de 26/10: o domínio de projeto/intake/manifesto/estratégia/blog alimenta o contexto automaticamente, com journal persistido e read-repair. O provisionamento do blog exige operador/projeto e intent/autoria antes da mutação. Ações message e crm_update incluem conversa/contato e parâmetros exatos; WhatsApp suporta parâmetros nomeados compatíveis nos dois contratos. Há OAuth/refresh, coleta adicional e enriquecimento de receipts com custo atribuível, evidência e métrica/proveniência/horário. Campos de resultado são validados antes da outbox; ausência não vira zero. Ações privadas não podem ser redirecionadas ao publicador de canal. Permanecem a configuração real e homologação de Authority, CMS, provedores e ambiente. Blog segue sob gestão Audience; DIM não cria um CMS estratégico paralelo.
