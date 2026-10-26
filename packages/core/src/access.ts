@@ -2,10 +2,20 @@ import { z } from "zod";
 import { decodeJwt } from "jose";
 import { createClient } from "@supabase/supabase-js";
 import { demand, uuid, text, type Actor } from "../../contracts/src/index";
-import { insert, one, type Database } from "../../db/src/index";
+import { insert, one, type Database, type DB } from "../../db/src/index";
 import { audit, authorize, member } from "./security";
 export const rolePermissions: Record<string, string[]> = {
   admin: ["*"],
+  audience_executor: [
+    "identity.read",
+    "governance.read",
+    "audience.sync",
+    "accounts.read",
+    "editorial.read",
+    "editorial.write",
+    "publication.read",
+    "publication.write",
+  ],
   manager: [
     "identity.read",
     "identity.write",
@@ -54,7 +64,7 @@ export const rolePermissions: Record<string, string[]> = {
   ],
 };
 export async function loadActor(
-  db: Database,
+  db: DB,
   userId: string,
   organizationId: string,
   aal: string,

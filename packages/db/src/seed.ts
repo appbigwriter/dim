@@ -26,6 +26,9 @@ export async function seedCatalog(db: DB) {
         [code],
       );
   }
+  await db.query(
+    "INSERT INTO custom_dim.connectors(platform_id,code,version,enabled,capabilities) SELECT id,code||'-official','1.0.0',true,'{}'::jsonb FROM custom_dim.platforms WHERE code IN('facebook','instagram','youtube','cms','email') ON CONFLICT DO NOTHING",
+  );
   for (const [code, name] of [
     ["researcher", "Pesquisador"],
     ["writer", "Redator"],

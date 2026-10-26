@@ -3,6 +3,16 @@ import {
   collectMetrics,
 } from "../../../packages/core/src/monitoring";
 import { templateParameters } from "../../../packages/connectors/src/templates";
+import { audienceActions } from "../../../packages/connectors/src/audience-actions";
+import {
+  observeAudienceExecutions,
+  flushAudienceReceipts,
+  pollAudienceActions,
+} from "../../../packages/core/src/audience-execution";
+import { audienceProvider } from "../../../packages/connectors/src/audience";
+import { sendEmailReply } from "../../../packages/core/src/email";
+import { channelConnector } from "../../../packages/connectors/src/channels";
+import { supabaseStorage } from "../../../packages/connectors/src/storage";
 import "dotenv/config";
 import { Queue, Worker } from "bullmq";
 import { Redis } from "ioredis";
@@ -35,6 +45,13 @@ const vault = new HashicorpVault(
   process.env.VAULT_MOUNT,
 );
 const telegram = new TelegramConnector();
+const storage =
+  process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY
+    ? supabaseStorage(
+        process.env.SUPABASE_URL,
+        process.env.SUPABASE_SERVICE_ROLE_KEY,
+      )
+    : undefined;
 const queue = new Queue("dim", { connection });
 const dlq = new Queue("dim-dlq", { connection });
 async function reserveRate(provider: string, accountId: string) {
@@ -64,22 +81,33 @@ const worker = new Worker(
         [job.data.id],
       );
       demand(
-        ["telegram", "x"].includes(provider?.code),
+        ["telegram", "x", "facebook", "instagram", "youtube", "cms"].includes(
+          provider?.code,
+        ),
         "PROVIDER_DISABLED",
         "Conector social não habilitado",
       );
-      const connector = provider.code === "x" ? new XConnector() : telegram;
       return executePublication(
         db,
         job.data.id,
-        {
-          health: connector.health.bind(connector),
-          publish: async (input) => {
-            await reserveRate(provider.code, provider.account_id);
-            return connector.publish(input);
-          },
+        (secret, resolve) => {
+          const connector =
+            provider.code === "x"
+              ? new XConnector()
+              : provider.code === "telegram"
+                ? telegram
+                : channelConnector(provider.code, secret, resolve);
+          return {
+            health: connector.health.bind(connector),
+            publish: async (input) => {
+              await reserveRate(provider.code, provider.account_id);
+              return connector.publish(input);
+            },
+          };
         },
         vault,
+        storage,
+        audienceActions(vault, fetch, process.env.APP_ENV === "development"),
       );
     }
     const operation = await one(
@@ -104,7 +132,7 @@ const worker = new Worker(
           db,
           operation.payload.requested_by,
           operation.organization_id,
-          "aal2",
+          operation.payload.requested_aal || "aal1",
           randomUUID(),
         );
         result = await scoped(db, actor, async (tx) => {
@@ -121,6 +149,7 @@ const worker = new Worker(
             operation.payload.purpose,
             operation.payload.template_id,
             operation.payload.template_parameters || [],
+            operation.payload.template_components,
           );
           const integration = await one(
             tx,
@@ -131,30 +160,40 @@ const worker = new Worker(
           const secret = await vault.get(integration.secret_ref);
           await reserveRate(provider, account.id);
           const sent =
-            provider === "telegram"
-              ? await telegram.publish({
-                  token: secret.token,
-                  destination: conversation.external_thread_id,
-                  text: operation.payload.text,
-                  idempotencyKey: operation.idempotency_key,
-                })
-              : await whatsappSend(
-                  secret.token,
-                  account.external_id,
-                  conversation.external_thread_id,
-                  template
-                    ? {
-                        template: {
-                          name: template.provider_template_id,
-                          language: { code: template.language },
-                          components: templateParameters(
-                            template,
-                            operation.payload.template_parameters || [],
-                          ),
-                        },
-                      }
-                    : { text: operation.payload.text },
-                );
+            provider === "email"
+              ? await sendEmailReply(
+                  tx,
+                  actor,
+                  conversation.id,
+                  operation.payload,
+                  operation.idempotency_key,
+                  vault,
+                )
+              : provider === "telegram"
+                ? await telegram.publish({
+                    token: secret.token,
+                    destination: conversation.external_thread_id,
+                    text: operation.payload.text,
+                    idempotencyKey: operation.idempotency_key,
+                  })
+                : await whatsappSend(
+                    secret.token,
+                    account.external_id,
+                    conversation.external_thread_id,
+                    template
+                      ? {
+                          template: {
+                            name: template.provider_template_id,
+                            language: { code: template.language },
+                            components: templateParameters(
+                              template,
+                              operation.payload.template_parameters || [],
+                              operation.payload.template_components,
+                            ),
+                          },
+                        }
+                      : { text: operation.payload.text },
+                  );
           await insert(tx, "messages", {
             organization_id: operation.organization_id,
             conversation_id: conversation.id,
@@ -248,7 +287,7 @@ const poll = async () => {
     // Persistent outbox + deterministic Bull IDs survive a crash between Redis enqueue and DB acknowledgement.
     const events = (
       await db.query(
-        "SELECT * FROM custom_dim.outbox_events WHERE processed_at IS NULL ORDER BY occurred_at LIMIT 100",
+        "SELECT * FROM custom_dim.outbox_events WHERE processed_at IS NULL AND event_type<>'audience.receipt' ORDER BY occurred_at LIMIT 100",
       )
     ).rows;
     for (const event of events) {
@@ -335,8 +374,23 @@ const monitor = async () => {
   if (monitoring) return;
   monitoring = true;
   try {
-    await monitorAccounts(db, vault);
-    await collectMetrics(db, vault);
+    const outcomes = await Promise.allSettled([
+      monitorAccounts(db, vault, undefined, !!storage?.download),
+      collectMetrics(db, vault),
+      pollAudienceActions(
+        db,
+        audienceActions(vault, fetch, process.env.APP_ENV === "development"),
+        audienceProvider(vault, fetch, process.env.APP_ENV === "development"),
+      ),
+      observeAudienceExecutions(db).then(() =>
+        flushAudienceReceipts(
+          db,
+          audienceActions(vault, fetch, process.env.APP_ENV === "development"),
+        ),
+      ),
+    ]);
+    if (outcomes.some((result) => result.status === "rejected"))
+      console.error(JSON.stringify({ event: "monitoring_partial_failure" }));
   } catch {
     console.error(JSON.stringify({ event: "monitoring_failed" }));
   } finally {

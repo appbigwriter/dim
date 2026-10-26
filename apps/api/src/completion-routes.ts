@@ -1,4 +1,18 @@
 import {
+  filterInbox,
+  escalateInbox,
+  saveEscalationPolicy,
+  escalationPolicy,
+  reviewPrivacy,
+  privacyReviewInput,
+  executePrivacy,
+  retentionPreview,
+} from "../../../packages/core/src/inbox-operations";
+import {
+  identityPresentation,
+  contentPresentation,
+} from "../../../packages/core/src/presentation";
+import {
   bindAudience,
   audienceState,
   syncAudience,
@@ -61,6 +75,57 @@ export function completionRoutes(
   },
   auth: (request: FastifyRequest) => Promise<void>,
 ) {
+  route("GET", "/influencers/:id/presentation", undefined, (db, a, r) =>
+    identityPresentation(db, a, uuid.parse(r.params.id)),
+  );
+  route("GET", "/contents/:id/presentation", undefined, (db, a, r) =>
+    contentPresentation(db, a, uuid.parse(r.params.id)),
+  );
+  route("GET", "/inbox/conversations", undefined, (db, a, r) =>
+    filterInbox(db, a, r.query),
+  );
+  route("POST", "/inbox/escalate", z.object({}).strict(), (db, a) =>
+    escalateInbox(db, a),
+  );
+  route("GET", "/settings/inbox-escalation", undefined, async (db, a) => {
+    authorize(a, "inbox.read");
+    const policy = await one(
+      db,
+      "SELECT settings FROM custom_dim.organization_settings WHERE organization_id=$1 AND module_key='inbox_escalation'",
+      [a.organizationId],
+    );
+    return (
+      policy?.settings || {
+        enabled: false,
+        after_minutes: 30,
+        assigned_to: null,
+      }
+    );
+  });
+  app.post(
+    "/api/v1/settings/inbox-escalation",
+    { preHandler: auth, schema: { body: escalationPolicy } },
+    async (req) =>
+      opts.db.transaction((tx) =>
+        saveEscalationPolicy(tx, (req as any).actor, req.body),
+      ),
+  );
+
+  route("GET", "/privacy/retention-preview", undefined, (db, a) =>
+    retentionPreview(db, a),
+  );
+  route(
+    "POST",
+    "/privacy/requests/:id/review",
+    privacyReviewInput,
+    (db, a, r) => reviewPrivacy(db, a, uuid.parse(r.params.id), r.body),
+  );
+  route(
+    "POST",
+    "/privacy/requests/:id/execute",
+    z.object({ dry_run: z.boolean().default(true), reason: text }).strict(),
+    (db, a, r) => executePrivacy(db, a, uuid.parse(r.params.id), r.body),
+  );
   route(
     "POST",
     "/influencers/:id/audience/bind",
@@ -194,6 +259,7 @@ export function completionRoutes(
       saveInboxPolicy(tx, (req as any).actor, req.body),
     ),
   );
+
   route("GET", "/settings/inbox", undefined, async (db, a) => {
     authorize(a, "inbox.read");
     return (

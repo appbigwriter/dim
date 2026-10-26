@@ -9,6 +9,7 @@ export default function InboxView({ organization }: { organization: string }) {
     [context, setContext] = useState<any>(),
     [error, setError] = useState(""),
     [text, setText] = useState(""),
+    [subject, setSubject] = useState(""),
     [purpose, setPurpose] = useState("service"),
     [template, setTemplate] = useState(""),
     [parameters, setParameters] = useState(""),
@@ -17,6 +18,24 @@ export default function InboxView({ organization }: { organization: string }) {
     [assignee, setAssignee] = useState(""),
     [note, setNote] = useState(""),
     [status, setStatus] = useState("open"),
+    [filterQuery, setFilterQuery] = useState(""),
+    [offset, setOffset] = useState(0),
+    [total, setTotal] = useState(0),
+    [info, setInfo] = useState(""),
+    [catalogs, setCatalogs] = useState<{
+      identities: any[];
+      accounts: any[];
+      contacts: any[];
+      team: any[];
+    }>({ identities: [], accounts: [], contacts: [], team: [] }),
+    [escalation, setEscalation] = useState({
+      enabled: false,
+      after_minutes: 30,
+      assigned_to: "",
+    }),
+    [headerValue, setHeaderValue] = useState(""),
+    [headerFilename, setHeaderFilename] = useState(""),
+    [buttonValues, setButtonValues] = useState<Record<number, string>>({}),
     [refresh, setRefresh] = useState(0),
     [busy, setBusy] = useState(false);
   useEffect(() => {
@@ -25,9 +44,15 @@ export default function InboxView({ organization }: { organization: string }) {
     setSelected(undefined);
     setContext(undefined);
     const fetchConversations = () =>
-      api(`/conversations?status=${status}&per_page=100`, organization)
+      api(
+        `/inbox/conversations?status=${status}&limit=50&offset=${offset}${filterQuery ? `&${filterQuery}` : ""}`,
+        organization,
+      )
         .then((r) => {
-          if (active) setConversations(r.data);
+          if (active) {
+            setConversations(r.data);
+            setTotal(r.total);
+          }
         })
         .catch((e) => {
           if (active) setError(e.message);
@@ -41,7 +66,44 @@ export default function InboxView({ organization }: { organization: string }) {
       active = false;
       clearInterval(timer);
     };
-  }, [organization, status]);
+  }, [organization, status, filterQuery, offset]);
+  useEffect(() => {
+    let active = true;
+    setCatalogs({ identities: [], accounts: [], contacts: [], team: [] });
+    setEscalation({ enabled: false, after_minutes: 30, assigned_to: "" });
+    api("/settings/inbox-escalation", organization)
+      .then((policy) => {
+        if (active)
+          setEscalation({
+            enabled: Boolean(policy.enabled),
+            after_minutes: policy.after_minutes ?? 30,
+            assigned_to: policy.assigned_to || "",
+          });
+      })
+      .catch((error) => {
+        if (active) setError(error.message);
+      });
+    Promise.allSettled([
+      api("/influencers?per_page=100", organization),
+      api("/accounts?per_page=100", organization),
+      api("/contacts?per_page=100", organization),
+      api("/users?per_page=100", organization),
+    ]).then((results) => {
+      if (active)
+        setCatalogs({
+          identities:
+            results[0].status === "fulfilled" ? results[0].value.data : [],
+          accounts:
+            results[1].status === "fulfilled" ? results[1].value.data : [],
+          contacts:
+            results[2].status === "fulfilled" ? results[2].value.data : [],
+          team: results[3].status === "fulfilled" ? results[3].value.data : [],
+        });
+    });
+    return () => {
+      active = false;
+    };
+  }, [organization]);
   useEffect(() => {
     if (!selected) return;
     let valid = true;
@@ -66,16 +128,318 @@ export default function InboxView({ organization }: { organization: string }) {
       valid = false;
     };
   }, [selected, organization, refresh]);
+  const selectedTemplate = context?.templates?.find(
+    (item: any) => item.id === template,
+  );
+  const templateDefinitions = selectedTemplate?.components || [];
+  const bodyDefinition = templateDefinitions.find(
+    (item: any) => item.type === "BODY",
+  );
+  const bodyPositions = [
+    ...new Set(
+      [...String(bodyDefinition?.text || "").matchAll(/\{\{(\d+)\}\}/g)].map(
+        (match) => Number(match[1]),
+      ),
+    ),
+  ].sort((a, b) => a - b);
+  const headerDefinition = templateDefinitions.find(
+    (item: any) => item.type === "HEADER",
+  );
+  const dynamicHeader =
+    headerDefinition &&
+    (headerDefinition.format !== "TEXT" ||
+      /\{\{/.test(headerDefinition.text || ""));
+  const buttons =
+    templateDefinitions.find((item: any) => item.type === "BUTTONS")?.buttons ||
+    [];
+  const unsupportedTemplate = templateDefinitions.some(
+    (item: any) =>
+      !["BODY", "HEADER", "FOOTER", "BUTTONS"].includes(item.type) ||
+      /\{\{[^0-9]/.test(item.text || ""),
+  );
+  const team = context?.team || catalogs.team;
+  async function adminAction(path: string, body: any, message: string) {
+    setBusy(true);
+    setError("");
+    setInfo("");
+    try {
+      const result = await api(path, organization, "POST", body);
+      setInfo(
+        message +
+          (typeof result.escalated === "number"
+            ? ` ${result.escalated} conversa(s).`
+            : ""),
+      );
+      setRefresh((value) => value + 1);
+      if (typeof result.escalated === "number") {
+        const list = await api(
+          `/inbox/conversations?status=${status}&limit=50&offset=${offset}${filterQuery ? `&${filterQuery}` : ""}`,
+          organization,
+        );
+        setConversations(list.data);
+        setTotal(list.total);
+      }
+    } catch (error) {
+      setError((error as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
   return (
     <section>
       {error && <ErrorBanner error={error} />}
+      {info && <p role="status">{info}</p>}
+      <details className="panel">
+        <summary>Filtrar conversas</summary>
+        <form
+          className="form-grid"
+          onSubmit={(event) => {
+            event.preventDefault();
+            const form = new FormData(event.currentTarget);
+            const query = new URLSearchParams();
+            for (const [key, value] of form.entries())
+              if (String(value))
+                query.set(
+                  key,
+                  key === "since" || key === "until"
+                    ? `${value}T${key === "since" ? "00:00:00.000" : "23:59:59.999"}Z`
+                    : String(value),
+                );
+            setOffset(0);
+            setFilterQuery(query.toString());
+          }}
+        >
+          <label>
+            Identidade
+            <select name="influencer_id">
+              <option value="">Todas permitidas</option>
+              {catalogs.identities.map((i) => (
+                <option key={i.id} value={i.id}>
+                  {i.public_name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Conta
+            <select name="social_account_id">
+              <option value="">Todas permitidas</option>
+              {catalogs.accounts.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.handle ||
+                    a.display_name ||
+                    a.external_id ||
+                    a.id.slice(0, 8)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Contato
+            <select name="contact_id">
+              <option value="">Todos</option>
+              {catalogs.contacts.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.display_name || c.id.slice(0, 8)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Canal
+            <select name="channel">
+              <option value="">Todos</option>
+              {[
+                "whatsapp",
+                "telegram",
+                "email",
+                "instagram",
+                "facebook",
+                "x",
+                "youtube",
+                "blog",
+                "crm",
+              ].map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Responsável
+            <select name="assigned_to">
+              <option value="">Todos</option>
+              {team.map((m: any) => (
+                <option key={m.user_id} value={m.user_id}>
+                  {m.display_name ||
+                    m.invitation_email ||
+                    m.user_id.slice(0, 8)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Atribuição
+            <select name="unassigned">
+              <option value="">Todas</option>
+              <option value="true">Sem responsável</option>
+              <option value="false">Com responsável</option>
+            </select>
+          </label>
+          <label>
+            Leitura
+            <select name="unread">
+              <option value="">Todas</option>
+              <option value="true">Com mensagens não lidas</option>
+              <option value="false">Lidas</option>
+            </select>
+          </label>
+          <label>
+            SLA
+            <select name="sla">
+              <option value="">Todos</option>
+              <option value="overdue">Vencido</option>
+              <option value="pending">Dentro do prazo</option>
+              <option value="none">Sem prazo</option>
+            </select>
+          </label>
+          <label>
+            Tag
+            <input name="tag" maxLength={40} />
+          </label>
+          <label>
+            Nome do contato
+            <input name="search" maxLength={160} />
+          </label>
+          <label>
+            Desde (UTC)
+            <input name="since" type="date" />
+          </label>
+          <label>
+            Até (UTC)
+            <input name="until" type="date" />
+          </label>
+          <button>Aplicar filtros</button>
+          <button
+            type="reset"
+            className="secondary"
+            onClick={() => {
+              setFilterQuery("");
+              setOffset(0);
+            }}
+          >
+            Limpar filtros
+          </button>
+        </form>
+      </details>
+      <details className="panel">
+        <summary>Política e escalonamento de SLA</summary>
+        <p>
+          A configuração exige permissão administrativa e MFA. O processamento
+          usa suas permissões de atendimento; nenhuma mensagem é enviada.
+        </p>
+        <form
+          className="form-grid"
+          onSubmit={(event) => {
+            event.preventDefault();
+            const form = new FormData(event.currentTarget);
+            void adminAction(
+              "/settings/inbox-escalation",
+              {
+                enabled: form.get("enabled") === "on",
+                after_minutes: Number(form.get("after_minutes")),
+                assigned_to: form.get("assigned_to"),
+              },
+              "Política de escalonamento salva.",
+            );
+          }}
+        >
+          <label>
+            <input
+              type="checkbox"
+              name="enabled"
+              checked={escalation.enabled}
+              onChange={(event) =>
+                setEscalation((current) => ({
+                  ...current,
+                  enabled: event.target.checked,
+                }))
+              }
+            />
+            Habilitar política
+          </label>
+          <label>
+            Minutos após o vencimento
+            <input
+              type="number"
+              name="after_minutes"
+              min={0}
+              max={43200}
+              value={escalation.after_minutes}
+              onChange={(event) =>
+                setEscalation((current) => ({
+                  ...current,
+                  after_minutes: Number(event.target.value),
+                }))
+              }
+              required
+            />
+          </label>
+          <label>
+            Responsável de escalonamento
+            <select
+              name="assigned_to"
+              required
+              value={escalation.assigned_to}
+              onChange={(event) =>
+                setEscalation((current) => ({
+                  ...current,
+                  assigned_to: event.target.value,
+                }))
+              }
+            >
+              <option value="">Selecione</option>
+              {team.map((m: any) => (
+                <option key={m.user_id} value={m.user_id}>
+                  {m.display_name ||
+                    m.invitation_email ||
+                    m.user_id.slice(0, 8)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button disabled={busy}>Salvar política com MFA</button>
+          <button
+            type="button"
+            className="secondary"
+            disabled={busy}
+            onClick={() =>
+              void adminAction(
+                "/inbox/escalate",
+                {},
+                "Escalonamento processado.",
+              )
+            }
+          >
+            Processar SLA vencido agora
+          </button>
+        </form>
+        <small>
+          O processamento automático depende do agendamento autenticado no
+          ambiente.
+        </small>
+      </details>
       <div className="inbox-grid">
         <aside className="panel inbox-list">
           <h2>Conversas</h2>
           <select
             aria-label="Estado das conversas"
             value={status}
-            onChange={(e) => setStatus(e.target.value)}
+            onChange={(e) => {
+              setStatus(e.target.value);
+              setOffset(0);
+            }}
           >
             <option value="open">Abertas</option>
             <option value="closed">Encerradas</option>
@@ -86,6 +450,13 @@ export default function InboxView({ organization }: { organization: string }) {
               className={`conversation-row ${selected?.id === c.id ? "selected" : ""}`}
               onClick={() => {
                 setSelected(c);
+                setSubject("");
+                setTemplate("");
+                setHeaderValue("");
+                setHeaderFilename("");
+                setButtonValues({});
+                setParameters("");
+                setInfo("");
                 setTags((c.tags || []).join(", "));
                 setMessages([]);
                 setContext(undefined);
@@ -101,6 +472,23 @@ export default function InboxView({ organization }: { organization: string }) {
               </small>
             </button>
           ))}
+          <p>
+            {conversations.length} conversa(s) nesta página · {total} no filtro
+          </p>
+          <div className="toolbar">
+            <button
+              disabled={offset === 0}
+              onClick={() => setOffset((value) => Math.max(0, value - 50))}
+            >
+              Anterior
+            </button>
+            <button
+              disabled={conversations.length < 50}
+              onClick={() => setOffset((value) => value + 50)}
+            >
+              Próxima
+            </button>
+          </div>
           {!conversations.length && (
             <Empty
               title="Inbox em dia"
@@ -136,10 +524,13 @@ export default function InboxView({ organization }: { organization: string }) {
                   setBusy(true);
                   try {
                     await api(
-                      `/conversations/${selected.id}/messages`,
+                      selected.channel === "email"
+                        ? `/conversations/${selected.id}/email/send`
+                        : `/conversations/${selected.id}/messages`,
                       organization,
                       "POST",
                       {
+                        ...(selected.channel === "email" ? { subject } : {}),
                         text,
                         purpose,
                         ...(template
@@ -148,6 +539,39 @@ export default function InboxView({ organization }: { organization: string }) {
                               template_parameters: parameters
                                 ? parameters.split("\n")
                                 : [],
+                              template_components: {
+                                ...(dynamicHeader
+                                  ? {
+                                      header:
+                                        headerDefinition.format === "TEXT"
+                                          ? { type: "text", text: headerValue }
+                                          : {
+                                              type: headerDefinition.format.toLowerCase(),
+                                              id: headerValue,
+                                              ...(headerFilename
+                                                ? { filename: headerFilename }
+                                                : {}),
+                                            },
+                                    }
+                                  : {}),
+                                buttons: buttons.flatMap(
+                                  (button: any, index: number) =>
+                                    button.type === "QUICK_REPLY" ||
+                                    (button.type === "URL" &&
+                                      /\{\{/.test(button.url || ""))
+                                      ? [
+                                          {
+                                            index,
+                                            type:
+                                              button.type === "URL"
+                                                ? "url"
+                                                : "quick_reply",
+                                            value: buttonValues[index] || "",
+                                          },
+                                        ]
+                                      : [],
+                                ),
+                              },
                             }
                           : {}),
                       },
@@ -162,6 +586,17 @@ export default function InboxView({ organization }: { organization: string }) {
                   }
                 }}
               >
+                {selected.channel === "email" && (
+                  <label>
+                    Assunto do e-mail
+                    <input
+                      required
+                      maxLength={998}
+                      value={subject}
+                      onChange={(event) => setSubject(event.target.value)}
+                    />
+                  </label>
+                )}
                 <label>
                   Resposta
                   <textarea
@@ -182,31 +617,120 @@ export default function InboxView({ organization }: { organization: string }) {
                       <option value="marketing">Marketing com opt-in</option>
                     </select>
                   </label>
-                  <label>
-                    Template aprovado
-                    <select
-                      value={template}
-                      onChange={(e) => setTemplate(e.target.value)}
-                    >
-                      <option value="">Mensagem livre, quando permitida</option>
-                      {context?.templates.map((t: any) => (
-                        <option key={t.id} value={t.id}>
-                          {t.provider_template_id} · {t.language}
+                  {selected.channel !== "email" && (
+                    <label>
+                      Template aprovado
+                      <select
+                        value={template}
+                        onChange={(e) => {
+                          setTemplate(e.target.value);
+                          setParameters("");
+                          setHeaderValue("");
+                          setHeaderFilename("");
+                          setButtonValues({});
+                        }}
+                      >
+                        <option value="">
+                          Mensagem livre, quando permitida
                         </option>
-                      ))}
-                    </select>
-                  </label>
+                        {context?.templates.map((t: any) => (
+                          <option key={t.id} value={t.id}>
+                            {t.provider_template_id} · {t.language}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
                 </div>
                 {template && (
-                  <label>
-                    Variáveis do template (uma por linha, na ordem)
-                    <textarea
-                      value={parameters}
-                      onChange={(e) => setParameters(e.target.value)}
-                    />
-                  </label>
+                  <fieldset>
+                    <legend>Parâmetros do template aprovado</legend>
+                    {unsupportedTemplate && (
+                      <p role="alert">
+                        Este template usa componentes ainda não habilitados.
+                        Escolha outro template.
+                      </p>
+                    )}
+                    {bodyPositions.map((position) => (
+                      <label key={position}>
+                        Variável BODY {position}
+                        <input
+                          required
+                          value={parameters.split("\n")[position - 1] || ""}
+                          onChange={(event) => {
+                            const next = parameters.split("\n");
+                            next[position - 1] = event.target.value;
+                            setParameters(next.join("\n"));
+                          }}
+                        />
+                      </label>
+                    ))}
+                    {dynamicHeader && (
+                      <label>
+                        {headerDefinition.format === "TEXT"
+                          ? "Texto variável do cabeçalho"
+                          : `ID da mídia ${headerDefinition.format.toLowerCase()} já enviada ao WhatsApp`}
+                        <input
+                          required
+                          value={headerValue}
+                          pattern={
+                            headerDefinition.format === "TEXT"
+                              ? undefined
+                              : "[0-9]{1,80}"
+                          }
+                          maxLength={
+                            headerDefinition.format === "TEXT" ? 60 : 80
+                          }
+                          onChange={(event) =>
+                            setHeaderValue(event.target.value)
+                          }
+                        />
+                      </label>
+                    )}
+                    {dynamicHeader &&
+                      headerDefinition.format === "DOCUMENT" && (
+                        <label>
+                          Nome do documento (opcional)
+                          <input
+                            value={headerFilename}
+                            maxLength={240}
+                            onChange={(event) =>
+                              setHeaderFilename(event.target.value)
+                            }
+                          />
+                        </label>
+                      )}
+                    {buttons.map((button: any, index: number) =>
+                      button.type === "QUICK_REPLY" ||
+                      (button.type === "URL" &&
+                        /\{\{/.test(button.url || "")) ? (
+                        <label key={index}>
+                          Botão {index + 1}: {button.text} ·{" "}
+                          {button.type === "URL"
+                            ? "sufixo da URL aprovada"
+                            : "valor de retorno"}
+                          <input
+                            required
+                            maxLength={2048}
+                            value={buttonValues[index] || ""}
+                            onChange={(event) =>
+                              setButtonValues((current) => ({
+                                ...current,
+                                [index]: event.target.value,
+                              }))
+                            }
+                          />
+                        </label>
+                      ) : null,
+                    )}
+                    {!bodyPositions.length &&
+                      !dynamicHeader &&
+                      !buttons.length && (
+                        <p>Este template não recebe variáveis.</p>
+                      )}
+                  </fieldset>
                 )}
-                <button disabled={busy}>
+                <button disabled={busy || unsupportedTemplate}>
                   {busy ? "Enviando à fila…" : "Enviar resposta"}
                 </button>
                 <small>
@@ -350,7 +874,10 @@ export default function InboxView({ organization }: { organization: string }) {
                           reason: data.get("reason"),
                         },
                       );
-                      setError("Solicitação registrada para revisão humana.");
+                      setInfo(
+                        "Solicitação registrada para revisão humana por outro responsável com MFA.",
+                      );
+                      setError("");
                     } catch (error) {
                       setError((error as Error).message);
                     }

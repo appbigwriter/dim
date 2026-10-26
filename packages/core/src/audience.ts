@@ -8,6 +8,15 @@ import { insert, one, type DB, type Database } from "../../db/src/index";
 import type { AudienceProvider } from "../../connectors/src/audience";
 import { audit, authorize, event, resource, scoped } from "./security";
 import { loadActor } from "./access";
+function authorizeSync(actor: Actor, influencerId: string) {
+  authorize(
+    actor,
+    actor.grants.some((g) => g.permission === "audience.sync")
+      ? "audience.sync"
+      : "governance.write",
+    { influencerId },
+  );
+}
 export async function bindAudience(
   db: DB,
   actor: Actor,
@@ -119,10 +128,11 @@ export async function syncAudience(
   actor: Actor,
   id: string,
   provider: AudienceProvider,
+  executionUserId?: string,
 ) {
   const initial = await scoped(db, actor, async (tx) => {
     await resource(tx, "influencers", id, actor);
-    authorize(actor, "governance.write", { influencerId: id });
+    authorizeSync(actor, id);
     const row = await one(
       tx,
       "SELECT * FROM custom_dim.audience_bindings WHERE influencer_id=$1",
@@ -155,7 +165,7 @@ export async function syncAudience(
       actor.correlationId,
     );
     return await scoped(db, currentActor, async (tx) => {
-      authorize(currentActor, "governance.write", { influencerId: id });
+      authorizeSync(currentActor, id);
       await tx.query(
         "SELECT id FROM custom_dim.influencers WHERE id=$1 FOR UPDATE",
         [id],
@@ -169,6 +179,14 @@ export async function syncAudience(
         binding,
         "AUDIENCE_BINDING_CHANGED",
         "Vínculo não encontrado",
+        409,
+      );
+      demand(
+        !executionUserId ||
+          (binding.execution_enabled &&
+            binding.executor_user_id === executionUserId),
+        "AUDIENCE_EXECUTOR_DISABLED",
+        "Execução automática desativada ou responsável alterado",
         409,
       );
       const previous = binding.current_context_id
@@ -325,6 +343,7 @@ export async function syncAudience(
   } catch (error) {
     const code =
       error instanceof AppError ? error.code : "AUDIENCE_UNAVAILABLE";
+    if (code === "AUDIENCE_EXECUTOR_DISABLED") throw error;
     await db.transaction(async (tx) => {
       const changed = await one(
         tx,

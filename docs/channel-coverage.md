@@ -1,27 +1,23 @@
-# Cobertura dos canais por influenciador
+# Cobertura dos nove canais
 
-Verificação em 25/10/2026. Escopo confirmado pelo usuário: Blogs, Instagram, Facebook, X, WhatsApp, Telegram, E-mail, YouTube e CRM devem integrar o produto para todas as identidades humanas, virtuais e híbridas.
+Verificação local em 25/10/2026. O escopo se aplica às identidades humanas, virtuais e híbridas. Catálogo, adaptador, conta autorizada e homologação são estados distintos. Nenhuma identidade recebe contas ou credenciais fictícias.
 
-**Esse escopo ainda não está integralmente implementado.** O recorte de MVP do PRD (ao menos uma rede) não equivale à entrega de todos os canais aprovados. Cadastro de plataforma, conta vinculada, implementação de adaptador e homologação externa são etapas distintas.
-
-| Item | Código existente | Falta para operação integral |
+| Canal | Implementado localmente | Limites e aceite externo |
 | --- | --- | --- |
-| Blogs | Catálogo CMS, contas e tarefas humanas | Adaptador CMS, provisionamento legítimo, autenticação, publicação, mídia, revisão e métricas |
-| Instagram | Catálogo e cadastro de contas | OAuth Meta, permissões, publicação de mídia, status/webhooks, métricas e limites por conta |
-| Facebook | Catálogo e cadastro de contas | OAuth Meta/Páginas, tokens/permissões, publicação, status/webhooks e métricas |
-| X | OAuth S256, publicação de texto, saúde e coleta de public_metrics | Homologação real, refresh e suporte ampliado a formatos/limites de planos |
-| WhatsApp | Cloud API, validação de número/token, assinatura, Inbox, opt-in, janela, templates paginados e variáveis de texto BODY | Conta Business aprovada, componentes de mídia/header/botões e homologação real |
-| Telegram | Bot API, texto, saúde, webhook, Inbox e resposta | Homologação real e capacidades adicionais de mídia/moderação |
-| E-mail | Catálogo, contas e tarefas humanas; convites Auth são um fluxo separado | Adaptador operacional de e-mail por influenciador, domínio/remetente, envio/recebimento, consentimento e entrega |
-| YouTube | Incluído no catálogo nesta revisão | OAuth Google, canais, upload de vídeo, processamento, publicação, métricas e quotas |
-| CRM | Contatos/consentimentos por tenant, vínculo manual, histórico, Inbox, notas, handoff, exportação e pedidos de titular | Filtros completos, automações, execução de retenção/exclusão e homologação dos processos |
+| Blogs | Contexto/ações Audience; gateway DIM; transporte WordPress no Audience com health e intent durável antes do envio | Configurar blog ativo/readback e credenciais; provisionamento e outros CMS exigem adapters |
+| Instagram | Graph via Facebook Login, inspeção de token/scopes/Página/conta profissional; JPEG privado e publicação de container | OAuth guiado/refresh, outros formatos, webhooks/métricas e homologação pendentes |
+| Facebook | Inspeção de token/scopes/titularidade da Página e publicação de texto | OAuth guiado/refresh, mídia, webhooks/métricas e homologação pendentes |
+| X | OAuth PKCE, texto, health, métricas públicas e falhas incertas | Refresh, planos/formatos adicionais e homologação real |
+| WhatsApp | Cloud API, assinatura, Inbox, opt-in/janela, templates BODY, header texto/mídia oficial e botões URL/quick reply | Business/Graph aprovados e testes reais; componentes avançados/named são bloqueados |
+| Telegram | Bot API, texto, health, webhook, Inbox e resposta | Mídia/moderação adicionais e homologação |
+| E-mail | Resend: domínio/remetente verificados, fila durável, destinatário verificado no servidor, consentimento e resposta | DNS/contas, confirmação de destinatário, recebimento e delivery/bounce pendentes; sem broadcast arbitrário |
+| YouTube | Scopes/canal, MP4 privado, upload resumable, título e declarações de público/privacidade no hash aprovado | OAuth guiado/refresh, processamento posterior, métricas/quotas e homologação |
+| CRM interno | Contatos/consentimentos, vínculo, Inbox, notas/handoff, filtros/paginação, SLA idempotente, export e apagamento operacional parcial com revisão independente | Agendamento autenticado de SLA, realtime, retenção externa/Storage/backups e homologação jurídica/operacional |
 
-A ficha de cada identidade mostra os nove itens, o estágio de implementação e suas contas visíveis. A API correspondente é `GET /api/v1/influencers/:id/channels`; ela aplica a permissão da identidade e filtra contas por escopo. Nenhuma identidade recebe contas ou credenciais fictícias automaticamente. Cada canal precisa de titularidade, autorização e capacidade verificadas para aquela conta.
+A ficha e `GET /api/v1/influencers/:id/channels` mostram os nove canais, contas visíveis e capacidade mínima verificada/fresca. Registro conectado sem capacidade comprovada permanece bloqueado. A API não presume homologação.
 
-O YouTube não aparecia no seed inicial. A quarta migration e o seed passam a incluí-lo como plataforma, sem declarar publicação de vídeo implementada.
+O worker publica texto em X/Telegram/Facebook, JPEG em Instagram, MP4 em YouTube e artigos via Audience/WordPress. Respostas WhatsApp/Telegram/e-mail usam Inbox e suas guardas. O contrato inicial de ação Audience é de publicação: ações de conversa/CRM, broadcasts e operações adicionais precisam de contratos específicos.
 
-As lacunas de Blogs, Instagram, Facebook, E-mail e YouTube incluem **código ainda ausente**, além de credenciais/aprovações externas. Não devem ser apresentadas apenas como configuração pendente.
+MP4 até 100 MiB e PDF/PNG/JPEG/WebP até 5 MiB exigem AV, MIME real, checksum, identidade e licença. Configurar limites correspondentes no proxy, Storage e ClamAV. Público/não listado no YouTube exige autorização no cofre além da revisão. Container Instagram sem confirmação fica incerto.
 
-## Integração Audience Builder confirmada em 25/10/2026
-
-A persona, o plano de autoridade e a gestão editorial dos blogs pertencem ao Audience Builder; o DIM executa as ações aprovadas nos canais e devolve resultados. A sincronização do contexto foi preparada/testada localmente, sem criar um CMS ou uma persona paralelos. Isso não implementa os adaptadores de publicação/provisionamento que ainda faltam, nem o ciclo de pedidos/receipts remoto. Ver `docs/audience-integration.md`.
+Detalhes: [conectores](connectors.md), [e-mail](email-integration.md), [Audience](audience-integration.md), [Inbox e privacidade](inbox-operations.md).

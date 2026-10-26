@@ -12,7 +12,7 @@ O consumidor DIM já vincula/sincroniza contexto aprovado e protege a persona ge
 
 O dev-doc confirma `vps2`, projeto Easypanel `sistemas`, serviço `dim`, domínio `dim.fbr.news`, Supabase central `https://supabase-control-tower-api.fbr.news`, project ID `3a4d3421-7d76-421c-afe2-e981e12ef64b`. Não fornece acesso à VPS, rede, volumes, versões, SMTP, credenciais ou n8n URL. Nenhum serviço remoto foi alterado.
 
-O dev-doc descreve um template genérico com sete tabelas; o PRD e o SQL revisado especificam 79 tabelas de domínio. A implementação preserva as 79 tabelas originais e acrescenta duas tabelas de integração Audience; mantém `custom_dim` e acrescenta `project_id`/`owner_id` à organização. Não transforma `entities/records` em uma segunda fonte de dados. O path `/09-codigo` citado pelo dev-doc diverge da raiz do monorepo: o build deve usar a raiz, e essa alteração exige validação no catálogo/Easypanel antes do deploy.
+O dev-doc descreve um template genérico com sete tabelas; o PRD e o SQL revisado especificam 79 tabelas de domínio. A implementação preserva essas 79 e acrescenta quatro de integração Audience (83 no total, mais histórico técnico de migrations); mantém `custom_dim` e acrescenta `project_id`/`owner_id` à organização. Não transforma `entities/records` em uma segunda fonte. O path `/09-codigo` citado pelo dev-doc diverge da raiz do monorepo: o build deve usar a raiz e essa adaptação exige validação no catálogo/Easypanel antes do deploy.
 
 ## Fluxo
 

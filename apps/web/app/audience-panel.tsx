@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { api } from "./client";
 import { ErrorBanner, StatusChip } from "../../../packages/ui/src/index";
+import AudienceActionsPanel from "./audience-actions-panel";
 export default function AudiencePanel({
   organization,
   id,
@@ -13,6 +14,8 @@ export default function AudiencePanel({
     [tenant, setTenant] = useState(""),
     [project, setProject] = useState(""),
     [persona, setPersona] = useState(""),
+    [executor, setExecutor] = useState(""),
+    [executionEnabled, setExecutionEnabled] = useState(false),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false),
     [refresh, setRefresh] = useState(0);
@@ -21,7 +24,11 @@ export default function AudiencePanel({
     setData(undefined);
     api(`/influencers/${id}/audience/context`, organization)
       .then((result) => {
-        if (valid) setData(result);
+        if (valid) {
+          setData(result);
+          setExecutor(result.binding?.executor_user_id || "");
+          setExecutionEnabled(result.binding?.execution_enabled || false);
+        }
       })
       .catch((e) => {
         if (valid) setError(e.message);
@@ -85,6 +92,51 @@ export default function AudiencePanel({
               {b}
             </p>
           ))}
+          <AudienceActionsPanel organization={organization} id={id} />
+          <details>
+            <summary>Execução contínua do plano aprovado</summary>
+            <p>
+              Um membro com papel audience_executor pode sincronizar o contexto,
+              preparar ações e agendar versões revisadas. A aprovação editorial
+              continua com outra pessoa. A configuração exige administração com
+              MFA.
+            </p>
+            <form
+              className="form-grid"
+              onSubmit={(e) => {
+                e.preventDefault();
+                void run("executor", {
+                  enabled: executionEnabled,
+                  ...(executionEnabled ? { executor_user_id: executor } : {}),
+                });
+              }}
+            >
+              <label>
+                <input
+                  type="checkbox"
+                  checked={executionEnabled}
+                  onChange={(e) => setExecutionEnabled(e.target.checked)}
+                />
+                Ativar processamento contínuo
+              </label>
+              <label>
+                Identificador do membro executor
+                <input
+                  value={executor}
+                  required={executionEnabled}
+                  onChange={(e) => setExecutor(e.target.value)}
+                  placeholder="UUID do membro com papel audience_executor"
+                />
+              </label>
+              <button disabled={busy}>Salvar execução contínua</button>
+            </form>
+            {data.binding.last_execution_error && (
+              <p className="error">
+                Execução aguardando correção:{" "}
+                {data.binding.last_execution_error}
+              </p>
+            )}
+          </details>
         </>
       ) : (
         <form

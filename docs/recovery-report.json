@@ -1,9 +1,9 @@
 {
-  "executed_at": "2026-10-25T04:47:36.427Z",
+  "executed_at": "2026-10-26T02:30:53.621Z",
   "environment": "Local isolated PGlite snapshot + separate file copy; not Supabase/VPS or remote backup verification",
   "database_restored": true,
   "media_restored": true,
   "checksum_verified": true,
-  "recovery_ms": 642.33,
+  "recovery_ms": 693.1,
   "production_rpo_rto": "Not measured; requires staging and remote backup credentials"
 }

@@ -13,7 +13,7 @@ O Compose não cria Supabase/n8n. A rede backend é interna; DB e Redis não pos
 1. Backup consistente e staging isolado compatível com `auth.users`, `auth.sessions` (incluindo `not_after`) e papéis Supabase.
 2. Revisar diferenças contra o baseline. Nunca aplicar sobre uma instalação desconhecida ou o template genérico sem inventário.
 3. `npm run db:migrate` aplica as migrations ainda não registradas e confere checksums. Execute um único runner por ambiente.
-4. A migration adiciona 79 tabelas de domínio e uma tabela técnica de histórico. As migrations seguintes adicionam constraints, RLS, imutabilidade e colunas de runtime, sem criar tabelas de domínio extras.
+4. A baseline adiciona 79 tabelas de domínio e uma de histórico. As seis migrations atuais também adicionam hardening/runtime e quatro tabelas privadas Audience, totalizando 83 tabelas além do histórico. Confira checksums entre supabase/migrations e packages/db/migrations antes da aplicação; nunca edite uma migration já aplicada no ambiente real.
 5. Copias em `supabase/migrations` e `packages/db/migrations` devem ser idênticas. Novas migrations são criadas com o CLI Supabase, copiadas para o runner e verificadas nos testes.
 6. Execute `prd/DIM-custom_dim-verificacao.sql`, testes de tenant e operações com o papel de runtime no staging real.
 
@@ -87,7 +87,7 @@ O teste automatizado restaura PGlite em outra instância e um arquivo de mídia 
 
 ## CI, deploy e rollback
 
-Pipeline: lint, TypeScript, testes, auditoria npm, OpenAPI, build Web, Compose e build de três imagens por SHA. A pipeline não foi executada no GitHub porque não há repositório remoto configurado. Testes locais e validação Compose foram executados. O daemon Docker local está indisponível: build de imagem, rede e Redis reais ficam para CI/staging.
+Pipeline: lint, TypeScript, testes, auditoria npm, OpenAPI, build Web, Compose e build de três imagens por SHA. A execução remota não foi homologada nesta rodada. Testes locais e validação Compose foram executados; build de imagens, rede e Redis reais continuam nos gates CI/staging.
 
 Antes do deploy no serviço existente `sistemas/dim`, registre imagens imutáveis anteriores, backup e configuração. Não mantenha o path `/09-codigo` se o catálogo apontar para esta raiz sem adaptação. Configure build args públicos do frontend e variáveis privadas apenas nos serviços backend. Execute migrations como job controlado; faça staging, smoke `/health`, login/MFA, cross-tenant, upload e publicação autorizada de teste. A produção exige os gates do plano.
 

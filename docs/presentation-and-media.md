@@ -1,0 +1,11 @@
+# Perfis e comparacao visual local
+
+A tela de identidade apresenta pessoa/representacao para humanos, personagem/consistencia para virtuais e os dois conjuntos para hibridos. Dados de biografia, publico e posicionamento provenientes do Audience sao somente leitura. Dados operacionais do DIM usam formulario estruturado e row_version; biografia local pode ser alterada apenas no legado. Transicoes e responsabilidades usam campos com os valores do contrato existente.
+
+`GET /influencers/:id/presentation` retorna dados autorizados da identidade, perfil, persona, titulares/consentimentos e ate 200 arquivos vinculados. Sem governance.read, persona, documentos e arquivos permanecem ocultos. `GET /contents/:id/presentation` retorna as ultimas 30 versoes salvas, seus textos, fontes, idiomas, formatos e referencias de arquivos. Nenhuma URL privada faz parte desses read models.
+
+A comparacao mostra duas versoes de texto com adicoes/remocoes, fontes adicionadas/removidas, idiomas/formatos e arquivos associados a cada versao. O diff e linear e preserva os caracteres exatos; marca o trecho alterado entre prefixo e sufixo comuns. A galeria da identidade permite comparar dois arquivos reais, com datas e checksums. Nao presume uma linhagem de versoes entre uploads independentes.
+
+Pre-visualizacoes exigem arquivo privado, tenant e identidade correspondentes, metadados de checksum/caminho/bucket verificados, scan clean e licenca vigente. A UI solicita exclusivamente `GET /storage/:id/download`, que revalida permissao/tenant/scan antes de assinar por 60 segundos. A imagem/video e removida ao expirar a assinatura ou a licenca (o primeiro prazo). Renovacao e erros de arquivo expirado ficam explicitos. URLs de videos externas nao sao aceitas em formularios de comparacao. PDF abre como documento privado; o painel nao executa HTML enviado pelo usuario.
+
+Cobertura sitebasics: painel autenticado de identidade, estudio e Inbox; campos rotulados, estados de erro/sucesso, fonte e direitos visiveis e uso de midia real. Paginas de aquisicao/SEO, depoimentos, Analytics, endereco/mapa e CTA comercial nao se aplicam a esta alteracao. Build e testes locais verificam o codigo; QA visual autenticada desktop/mobile e homologacao de Storage/AV/licencas reais permanecem gates separados.

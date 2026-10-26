@@ -245,7 +245,10 @@ export async function reschedule(
     influencerId: account.influencer_id,
     accountId: account.id,
   });
-  await publicationGuard(db, actor, job);
+  await publicationGuard(db, actor, {
+    ...job,
+    scheduled_at: data.scheduled_at,
+  });
   const updated = await one(
     db,
     "UPDATE custom_dim.publication_jobs SET scheduled_at=$1,row_version=row_version+1,status='queued' WHERE id=$2 AND row_version=$3 AND status IN('queued','retry') RETURNING *",

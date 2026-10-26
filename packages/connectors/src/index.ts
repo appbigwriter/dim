@@ -61,6 +61,13 @@ export interface Connector {
     destination: string;
     text: string;
     idempotencyKey: string;
+    payload?: {
+      mediaAssetIds?: string[];
+      title?: string;
+      subject?: string;
+      body?: Record<string, unknown>;
+    };
+    beforeSend?: () => Promise<void>;
   }): Promise<PublishResult>;
   health(
     token: string,
@@ -69,6 +76,8 @@ export interface Connector {
     publish: boolean;
     readMessages: boolean;
     sendMessages: boolean;
+    scopes?: string[];
+    expiresAt?: string;
   }>;
 }
 const circuits = new Map<string, { failures: number; until: number }>();
@@ -129,12 +138,8 @@ export class TelegramConnector implements Connector {
     );
     return `https://api.telegram.org/bot${token}/${method}`;
   }
-  async publish(input: {
-    token: string;
-    destination: string;
-    text: string;
-    idempotencyKey: string;
-  }) {
+  async publish(input: Parameters<Connector["publish"]>[0]) {
+    await input.beforeSend?.();
     const result = await providerRequest(
       this.url(input.token, "sendMessage"),
       "",
@@ -166,12 +171,8 @@ export class TelegramConnector implements Connector {
   }
 }
 export class XConnector implements Connector {
-  async publish(input: {
-    token: string;
-    destination: string;
-    text: string;
-    idempotencyKey: string;
-  }) {
+  async publish(input: Parameters<Connector["publish"]>[0]) {
+    await input.beforeSend?.();
     const result = await providerRequest(
       "https://api.x.com/2/tweets",
       input.token,
@@ -208,10 +209,7 @@ export async function whatsappSend(
     template?: {
       name: string;
       language: { code: string };
-      components?: {
-        type: string;
-        parameters: { type: string; text: string }[];
-      }[];
+      components?: import("./templates").WhatsappComponent[];
     };
   },
 ) {

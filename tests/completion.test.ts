@@ -125,7 +125,10 @@ test("onboarding cannot bypass validated steps, requires clean identity evidence
     assert.equal(coverage.data.length, 9);
     assert(
       coverage.data.some(
-        (c) => c.code === "youtube" && c.implementation === "catalog_only",
+        (c) =>
+          c.code === "youtube" &&
+          c.implementation === "local_partial" &&
+          (c.capabilities as readonly string[]).includes("publish_video"),
       ),
     );
     assert(coverage.data.every((c) => !c.connected_record));

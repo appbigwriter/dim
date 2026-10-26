@@ -4,6 +4,8 @@ Implementação local do PRD e do plano S00–S09 em `prd/`. Monorepo TypeScript
 
 **Estado de entrega:** aplicação compilável e fluxos principais verificados localmente. Homologação, infraestrutura remota e integrações reais permanecem nos gates descritos em [docs/implementation-status.md](docs/implementation-status.md). A existência de código não representa aprovação dos gates de produção.
 
+Audience Builder gere persona/autoridade/blog; DIM executa as ações aprovadas com revisão e direitos locais. A rodada atual acrescenta execução contínua separada, receipts duráveis, WordPress via Audience, Facebook/Instagram/YouTube, respostas Resend, Inbox/privacidade e comparação de mídia. Configuração e limites por canal: [integração Audience](docs/audience-integration.md), [cobertura dos nove canais](docs/channel-coverage.md).
+
 ## Preparar o ambiente
 
 Requer Node 24, PostgreSQL/Supabase compatível, Redis e credenciais do ambiente. O repositório não contém segredos. No PowerShell, na raiz:

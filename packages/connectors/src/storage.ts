@@ -7,6 +7,7 @@ import { audit, authorize, resource } from "../../core/src/security";
 export interface PrivateStorage {
   upload(path: string, data: Buffer, mime: string): Promise<void>;
   sign(path: string): Promise<string>;
+  download?(path: string, maxBytes?: number): Promise<Buffer>;
 }
 export function supabaseStorage(
   url: string,
@@ -17,6 +18,21 @@ export function supabaseStorage(
     auth: { persistSession: false, autoRefreshToken: false },
   });
   return {
+    async download(path, maxBytes = 100 * 1024 * 1024) {
+      const result = await client.storage.from(bucket).download(path);
+      demand(
+        result.data && !result.error,
+        "STORAGE_UNAVAILABLE",
+        "Falha ao carregar arquivo privado",
+        503,
+      );
+      demand(
+        result.data.size <= maxBytes,
+        "FILE_TOO_LARGE",
+        "Arquivo excede o limite autorizado",
+      );
+      return Buffer.from(await result.data.arrayBuffer());
+    },
     async upload(path, data, mime) {
       const result = await client.storage
         .from(bucket)
@@ -55,6 +71,16 @@ export function sniffMime(data: Buffer) {
     data.subarray(8, 12).toString() === "WEBP"
   )
     return "image/webp";
+  if (
+    data.length >= 16 &&
+    data.readUInt32BE(0) >= 16 &&
+    data.readUInt32BE(0) <= data.length &&
+    data.subarray(4, 8).toString() === "ftyp" &&
+    /^(isom|iso[2-9]|mp41|mp42|avc1|M4V )$/.test(
+      data.subarray(8, 12).toString(),
+    )
+  )
+    return "video/mp4";
   return undefined;
 }
 export async function clamScan(
@@ -108,11 +134,24 @@ export async function uploadPrivate(
 ) {
   await resource(db, "influencers", input.influencer_id, actor);
   authorize(actor, "governance.write", { influencerId: input.influencer_id });
+  const maxBytes =
+    input.mime_type === "video/mp4" ? 100 * 1024 * 1024 : 5 * 1024 * 1024;
+  const padding = input.base64.indexOf("=");
+  demand(
+    input.base64.length <= Math.ceil(maxBytes / 3) * 4 &&
+      input.base64.length % 4 === 0 &&
+      !/[^A-Za-z0-9+/=]/.test(input.base64) &&
+      (padding === -1 ||
+        (padding >= input.base64.length - 2 &&
+          /^={1,2}$/.test(input.base64.slice(padding)))),
+    "INVALID_BASE64",
+    "Arquivo Base64 inválido ou acima do limite",
+  );
   const data = Buffer.from(input.base64, "base64");
   demand(
-    data.length > 0 && data.length <= 5 * 1024 * 1024,
+    data.length > 0 && data.length <= maxBytes,
     "FILE_TOO_LARGE",
-    "Arquivo deve ter no máximo 5 MB",
+    "Arquivo excede o limite autorizado para o formato",
   );
   demand(
     sniffMime(data) === input.mime_type,
@@ -139,4 +178,55 @@ export async function uploadPrivate(
     byte_size: data.length,
   });
   return row;
+}
+
+/** Call inside a scoped transaction; the publication guard separately checks the current media license. */
+export async function loadVerifiedMedia(
+  db: DB,
+  actor: Actor,
+  assetId: string,
+  storage: PrivateStorage,
+) {
+  const object = await resource(db, "storage_objects", assetId, actor);
+  authorize(actor, "editorial.read", { influencerId: object.influencer_id });
+  demand(
+    object.influencer_id &&
+      object.object_path?.startsWith(
+        `${actor.organizationId}/${object.influencer_id}/`,
+      ) &&
+      !object.object_path.includes("..") &&
+      object.bucket === "dim-private" &&
+      object.visibility === "private" &&
+      object.scan_status === "clean" &&
+      /^[a-f0-9]{64}$/.test(object.sha256 || ""),
+    "MEDIA_NOT_VERIFIED",
+    "Mídia privada não verificada",
+  );
+  demand(
+    storage.download,
+    "MEDIA_TRANSPORT_REQUIRED",
+    "Transporte privado de mídia não configurado",
+    503,
+  );
+  const maxBytes =
+    object.mime_type === "video/mp4" ? 100 * 1024 * 1024 : 5 * 1024 * 1024;
+  demand(
+    Number(object.byte_size) > 0 && Number(object.byte_size) <= maxBytes,
+    "FILE_TOO_LARGE",
+    "Tamanho da mídia inválido",
+  );
+  const bytes = await storage.download(object.object_path, maxBytes);
+  demand(
+    bytes.length === Number(object.byte_size) &&
+      createHash("sha256").update(bytes).digest("hex") === object.sha256 &&
+      sniffMime(bytes) === object.mime_type,
+    "MEDIA_INTEGRITY_FAILED",
+    "Bytes da mídia diferem do arquivo aprovado",
+    409,
+  );
+  return {
+    bytes,
+    mime: object.mime_type as string,
+    publicUrl: await storage.sign(object.object_path),
+  };
 }

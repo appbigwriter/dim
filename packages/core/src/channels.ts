@@ -5,20 +5,25 @@ export const channelCoverage = [
   {
     code: "cms",
     name: "Blogs",
-    implementation: "catalog_only",
-    capabilities: [],
+    implementation: "local_partial",
+    capabilities: [
+      "audience_context",
+      "approved_actions",
+      "publish_article",
+      "wordpress_transport",
+    ],
   },
   {
     code: "instagram",
     name: "Instagram",
-    implementation: "catalog_only",
-    capabilities: [],
+    implementation: "local_partial",
+    capabilities: ["official_health", "publish_media", "private_media"],
   },
   {
     code: "facebook",
     name: "Facebook",
-    implementation: "catalog_only",
-    capabilities: [],
+    implementation: "local_partial",
+    capabilities: ["official_health", "publish_text"],
   },
   {
     code: "x",
@@ -35,6 +40,8 @@ export const channelCoverage = [
       "webhooks",
       "send_messages",
       "body_templates",
+      "header_templates",
+      "button_templates",
     ],
   },
   {
@@ -46,14 +53,19 @@ export const channelCoverage = [
   {
     code: "email",
     name: "E-mail",
-    implementation: "catalog_only",
-    capabilities: [],
+    implementation: "local_partial",
+    capabilities: ["verified_sender", "consented_reply", "send_messages"],
   },
   {
     code: "youtube",
     name: "YouTube",
-    implementation: "catalog_only",
-    capabilities: [],
+    implementation: "local_partial",
+    capabilities: [
+      "official_health",
+      "publish_video",
+      "private_media",
+      "resumable_upload",
+    ],
   },
   {
     code: "crm",
@@ -66,6 +78,10 @@ export const channelCoverage = [
       "export",
       "inbox",
       "handoff",
+      "filters",
+      "sla_escalation",
+      "privacy_review",
+      "operational_erasure",
     ],
   },
 ] as const;
@@ -78,6 +94,14 @@ export async function identityChannels(db: DB, actor: Actor, id: string) {
       [actor.organizationId, id],
     )
   ).rows.filter((a) => visible(actor, "accounts.read", a));
+  const verifiedCapabilities = accounts.length
+    ? (
+        await db.query(
+          "SELECT c.social_account_id,c.capability_code FROM custom_dim.account_capabilities c JOIN custom_dim.account_integrations i ON i.social_account_id=c.social_account_id WHERE c.organization_id=$1 AND c.available=true AND c.checked_at>now()-interval '24 hours' AND i.status='active' AND i.last_tested_at>now()-interval '24 hours' AND (i.expires_at IS NULL OR i.expires_at>now())",
+          [actor.organizationId],
+        )
+      ).rows.filter((c) => accounts.some((a) => a.id === c.social_account_id))
+    : [];
   const minimum: Record<string, string> = {
     cms: "publish_article",
     instagram: "publish_media",
@@ -85,7 +109,7 @@ export async function identityChannels(db: DB, actor: Actor, id: string) {
     x: "publish_text",
     whatsapp: "send_messages",
     telegram: "publish_text",
-    email: "send_email",
+    email: "send_messages",
     youtube: "publish_video",
   };
   const data = channelCoverage.map((c) => {
@@ -98,8 +122,17 @@ export async function identityChannels(db: DB, actor: Actor, id: string) {
       c.code === "crm"
         ? []
         : [
-            ...(c.implementation === "catalog_only"
-              ? ["adapter_not_implemented"]
+            ...(!linked.some(
+              (a) =>
+                a.account_status === "active" &&
+                a.integration_status === "connected" &&
+                verifiedCapabilities.some(
+                  (cap) =>
+                    cap.social_account_id === a.id &&
+                    cap.capability_code === minimum[c.code],
+                ),
+            )
+              ? ["capability_not_verified"]
               : []),
             ...(!linked.length
               ? ["account_not_linked"]

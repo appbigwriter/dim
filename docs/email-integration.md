@@ -1,0 +1,17 @@
+# E-mail individual por influenciador
+
+O transporte `ResendEmail` usa a API pública oficial do Resend, com endpoint fixo `https://api.resend.com`, Bearer, timeout, redirecionamentos proibidos e respostas limitadas a 1 MiB. Não envia broadcast, CC, BCC, HTML, anexo ou destinatário fornecido pelo navegador.
+
+O cofre da integração deve conter `provider=resend`, `token`, `domain_id` e `from_email`. O remetente deve coincidir exatamente com `social_accounts.external_id` após normalização do domínio. GET `/domains/{domain_id}` deve retornar o mesmo domínio, `status=verified` e `capabilities.sending=enabled`. Isso habilita `send_messages`; publicação editorial em massa e leitura de Inbox não são anunciadas.
+
+POST `/api/v1/conversations/:id/email/send` aceita somente `{subject,text,purpose}` e `Idempotency-Key`. A operação persiste em `operation_jobs` com tipo `inbox.send`, compatível com cancelamento/supressão existentes de privacidade. `queueEmailReply` valida antes da fila; `sendEmailReply` repete as verificações antes do envio. O worker insere a mensagem e o ID de resposta seguindo seu fluxo normal.
+
+O contato deve estar ativo e possuir vínculo ativo com o influenciador da conta. A conversa referencia `contact_identities.id` ou seu `external_identifier_hash`, nunca um endereço arbitrário. A identidade de contato da plataforma e-mail deve estar `verified`; `encrypted_reference` aponta para `dim/{organizationId}/contacts/{contactId}/email/{reference}` no cofre, contendo `{email}`. O hash deve ser `hash({provider:"email",identifier:email})`, com domínio em minúsculas e parte local preservada. O sistema não declara um endereço verificado a partir da simples digitação: o cadastro dessa evidência requer processo de verificação confiável. O fluxo completo de confirmação e recebimento ainda deve ser homologado/configurado.
+
+Marketing exige consentimento não revogado, não supersedido e não expirado para canal e-mail e finalidade marketing. Atendimento exige mensagem recebida nos últimos 30 dias, no contato/conversa verificados. Esse prazo é uma política conservadora local, não uma limitação do Resend. Contato apagado/restrito, vínculo removido, identidade suspensa, conta desconectada, capacidade ausente, membership/grant revogados ou remetente/domínio não verificados bloqueiam o envio.
+
+Após carregar credenciais, verificar domínio e resolver destinatário, o core repete os guards e compara identidade/endereço antes do POST externo. Uma revogação observada nesse intervalo impede a chamada de envio. O lock do contato permanece durante a transação do worker. O Resend recebe `Idempotency-Key` derivada de organização e operação; a retenção documentada do provedor é 24 horas. Timeout/5xx ou resposta sem ID confiável resultam em `uncertain`, sem repetição automática cega. Um ID aceito confirma processamento pelo provedor, não entrega na caixa postal.
+
+Permanecem externas: credenciais Resend com acesso ao domínio, DNS verificado, processo de confirmação de endereço, webhooks autenticados de recebimento/delivery/bounce e homologação. Os testes usam HTTP e cofre injetados e verificam inclusive consentimento/membership revogados durante a checagem remota, sem enviar mensagens reais.
+
+Fontes primárias consultadas em 25/10/2026: [Send Email](https://resend.com/docs/api-reference/emails/send-email), [Retrieve Domain](https://resend.com/docs/api-reference/domains/get-domain), [Idempotency Keys](https://resend.com/docs/dashboard/emails/idempotency-keys).

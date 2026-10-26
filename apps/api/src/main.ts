@@ -1,11 +1,13 @@
 import { audienceProvider } from "../../../packages/connectors/src/audience";
+import { audienceActions } from "../../../packages/connectors/src/audience-actions";
 import "dotenv/config";
 import { createClient } from "@supabase/supabase-js";
 import { decodeJwt } from "jose";
 import { Redis } from "ioredis";
 import { postgres, one } from "../../../packages/db/src/index";
 import { migrate } from "../../../packages/db/src/migrate";
-import { supabaseAuth } from "../../../packages/core/src/access";
+import { supabaseAuth, loadActor } from "../../../packages/core/src/access";
+import { verifySimpleToken } from "../../../packages/core/src/simple-auth";
 import { demand } from "../../../packages/contracts/src/index";
 import { HashicorpVault } from "../../../packages/connectors/src/index";
 import { buildApp } from "./app";
@@ -61,6 +63,9 @@ const app = await buildApp({
   audience: vault
     ? audienceProvider(vault, fetch, process.env.APP_ENV === "development")
     : undefined,
+  audienceActions: vault
+    ? audienceActions(vault, fetch, process.env.APP_ENV === "development")
+    : undefined,
   storage,
   scan,
   invite: process.env.SUPABASE_SERVICE_ROLE_KEY
@@ -85,12 +90,27 @@ const app = await buildApp({
         return { userId: data.user.id };
       }
     : undefined,
-  authenticate: supabaseAuth(
-    db,
-    process.env.SUPABASE_URL!,
-    process.env.SUPABASE_ANON_KEY!,
-  ),
+  authenticate: async (token, org, correlationId) => {
+    const simple = await verifySimpleToken(token);
+    if (simple?.sub) {
+      return loadActor(db, simple.sub, org, simple.aal, correlationId);
+    }
+    const fallback = supabaseAuth(
+      db,
+      process.env.SUPABASE_URL!,
+      process.env.SUPABASE_ANON_KEY!,
+    );
+    return fallback(token, org, correlationId);
+  },
   session: async (token) => {
+    const simple = await verifySimpleToken(token);
+    if (simple?.sub) {
+      return {
+        userId: simple.sub,
+        emailVerified: true,
+        aal: simple.aal,
+      };
+    }
     const { data, error } = await client.auth.getUser(token);
     demand(!error && data.user, "INVALID_SESSION", "Sessão inválida", 401);
     const claims = decodeJwt(token);

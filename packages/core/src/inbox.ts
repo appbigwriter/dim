@@ -3,7 +3,11 @@ import { demand, text, uuid, type Actor } from "../../contracts/src/index";
 import { insert, one, type DB } from "../../db/src/index";
 import { audit, authorize, hash, member, resource } from "./security";
 import { operation } from "./editorial";
-import { templateParameters } from "../../connectors/src/templates";
+import {
+  templateParameters,
+  templateComponentInput,
+  type TemplateComponentInput,
+} from "../../connectors/src/templates";
 import { ProviderFailure } from "../../connectors/src/index";
 export async function ingest(
   db: DB,
@@ -124,6 +128,26 @@ export async function normalizeIncoming(db: DB, job: any) {
       influencer_id: account.influencer_id,
     });
   }
+  const currentContact = await one(
+    db,
+    "SELECT status FROM custom_dim.contacts WHERE id=$1 AND organization_id=$2 FOR UPDATE",
+    [contact.id, job.organization_id],
+  );
+  if (
+    currentContact?.status === "erased" ||
+    currentContact?.status === "restricted"
+  ) {
+    await db.query(
+      "UPDATE custom_dim.webhook_events SET processing_state='processed' WHERE id=$1",
+      [job.payload.event_id],
+    );
+    // Keep the suppression hash to prevent silently recreating an erased contact.
+    await db.query(
+      "UPDATE custom_dim.operation_jobs SET payload=jsonb_build_object('event_id',$1::text,'suppressed',true) WHERE id=$2",
+      [job.payload.event_id, job.id],
+    );
+    return { suppressed: true };
+  }
   let conversation = await one(
     db,
     "SELECT * FROM custom_dim.conversations WHERE organization_id=$1 AND social_account_id=$2 AND external_thread_id=$3 AND status='open'",
@@ -172,11 +196,16 @@ export async function messageGuard(
   purpose: string,
   templateId?: string,
   parameters: string[] = [],
+  components: TemplateComponentInput = {},
 ) {
   authorize(actor, "inbox.write", {
     influencerId: conversation.influencer_id,
     accountId: conversation.social_account_id,
   });
+  await db.query(
+    "SELECT id FROM custom_dim.contacts WHERE id=$1 AND organization_id=$2 FOR UPDATE",
+    [conversation.contact_id, actor.organizationId],
+  );
   const contact = await resource(
     db,
     "contacts",
@@ -286,7 +315,7 @@ export async function messageGuard(
         "TEMPLATE_UNAPPROVED",
         "Template sem aprovação do provedor",
       );
-      templateParameters(template, parameters);
+      templateParameters(template, parameters, components);
       return { account, provider: platform.code, template };
     }
   }
@@ -305,6 +334,7 @@ export async function sendMessage(
       purpose: z.enum(["service", "marketing"]),
       template_id: uuid.optional(),
       template_parameters: z.array(text).max(30).default([]),
+      template_components: templateComponentInput.optional(),
     })
     .strict()
     .parse(input);
@@ -316,13 +346,14 @@ export async function sendMessage(
     data.purpose,
     data.template_id,
     data.template_parameters,
+    data.template_components,
   );
   const result = await operation(
     db,
     actor,
     "inbox.send",
     id,
-    { ...data, requested_by: actor.userId },
+    { ...data, requested_by: actor.userId, requested_aal: actor.aal },
     key,
   );
   await audit(db, actor, "message_queued", "conversations", id, {

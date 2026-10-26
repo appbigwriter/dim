@@ -9,6 +9,8 @@ import {
 import { insert, one, type DB } from "../../db/src/index";
 import { audit, authorize, event, hash, resource } from "./security";
 import { rightsBlockers } from "./identity";
+import { validateAudienceAction } from "../../contracts/src/audience-actions";
+import { channelCapabilityCode } from "../../connectors/src/channels";
 export async function contentVersion(
   db: DB,
   actor: Actor,
@@ -42,8 +44,15 @@ export async function contentVersion(
       },
     };
   }
-  for (const asset of data.asset_ids)
-    await resource(db, "storage_objects", asset, actor);
+  for (const asset of data.asset_ids) {
+    const media = await resource(db, "storage_objects", asset, actor);
+    demand(
+      media.influencer_id === content.influencer_id,
+      "ASSET_IDENTITY_MISMATCH",
+      "Mídia pertence a outra identidade",
+      409,
+    );
+  }
   const previous = await one(
     db,
     "SELECT coalesce(max(version_number),0) AS n FROM custom_dim.content_versions WHERE content_id=$1",
@@ -100,6 +109,25 @@ export async function verifyContent(db: DB, actor: Actor, versionId: string) {
     version.content_id,
     actor,
   );
+  const sourceExecution = await one(
+    db,
+    "SELECT e.*,b.tenant_id,b.project_id,b.persona_id,b.current_context_id FROM custom_dim.audience_execution_requests e JOIN custom_dim.audience_bindings b ON b.id=e.binding_id WHERE e.content_id=$1",
+    [content.id],
+  );
+  if (sourceExecution) {
+    validateAudienceAction(sourceExecution.action, {
+      tenant_id: sourceExecution.tenant_id,
+      project_id: sourceExecution.project_id,
+      persona_id: sourceExecution.persona_id,
+    });
+    demand(
+      sourceExecution.content_version_id === version.id &&
+        sourceExecution.context_id === sourceExecution.current_context_id,
+      "AUDIENCE_ACTION_CHANGED",
+      "Obtenha nova ação aprovada após alteração do conteúdo ou contexto",
+      409,
+    );
+  }
   authorize(actor, "editorial.read", { influencerId: content.influencer_id });
   const identity = await resource(
     db,
@@ -274,6 +302,46 @@ export async function publicationGuard(db: DB, actor: Actor, job: any) {
     version.content_id,
     actor,
   );
+  const sourceAction = await one(
+    db,
+    "SELECT e.*,b.execution_enabled,b.executor_user_id FROM custom_dim.audience_execution_requests e JOIN custom_dim.audience_bindings b ON b.id=e.binding_id WHERE e.content_id=$1",
+    [content.id],
+  );
+  if (sourceAction?.automatic) {
+    demand(
+      sourceAction.execution_enabled &&
+        sourceAction.executor_user_id === sourceAction.requested_by &&
+        actor.userId === sourceAction.requested_by,
+      "AUDIENCE_EXECUTOR_DISABLED",
+      "Execução automática desativada ou responsável alterado",
+      409,
+    );
+    demand(
+      !actor.grants.some(
+        (g) =>
+          g.permission === "approval.write" ||
+          g.permission === "*" ||
+          g.permission.startsWith("security."),
+      ),
+      "AUDIENCE_EXECUTOR_PRIVILEGES",
+      "Executor automático deve permanecer separado de aprovação e administração",
+      403,
+    );
+  }
+  demand(
+    !sourceAction || sourceAction.social_account_id === account.id,
+    "AUDIENCE_ACTION_ACCOUNT",
+    "Ação da origem aprovada para outra conta",
+    409,
+  );
+  demand(
+    !sourceAction ||
+      new Date(job.scheduled_at).getTime() ===
+        new Date(sourceAction.action.scheduledAt).getTime(),
+    "AUDIENCE_ACTION_SCHEDULE",
+    "Horário difere da ação aprovada na origem",
+    409,
+  );
   if (identity.type !== "human") {
     const disclosure = await one(
       db,
@@ -370,8 +438,8 @@ export async function publicationGuard(db: DB, actor: Actor, job: any) {
   demand(
     await one(
       db,
-      "SELECT id FROM custom_dim.account_capabilities WHERE social_account_id=$1 AND capability_code='publish_text' AND available=true AND checked_at>now()-interval '24 hours'",
-      [account.id],
+      "SELECT id FROM custom_dim.account_capabilities WHERE social_account_id=$1 AND capability_code=$2 AND available=true AND checked_at>now()-interval '24 hours'",
+      [account.id, channelCapabilityCode(platform?.code)],
     ),
     "CAPABILITY_UNAVAILABLE",
     "Publicação não autorizada",
@@ -407,8 +475,26 @@ export async function schedule(
     );
     return old;
   }
+  const originatingAction = await one(
+    db,
+    "SELECT id,action FROM custom_dim.audience_execution_requests WHERE content_version_id=$1 AND social_account_id=$2",
+    [data.content_version_id, data.social_account_id],
+  );
   demand(
-    new Date(data.scheduled_at).getTime() >= Date.now() - 60000,
+    !originatingAction || key === `audience:${originatingAction.id}`,
+    "AUDIENCE_ACTION_IDEMPOTENCY",
+    "Use o agendamento da ação Audience para impedir publicação duplicada",
+    409,
+  );
+  demand(
+    new Date(data.scheduled_at).getTime() >= Date.now() - 60000 ||
+      !!(
+        originatingAction &&
+        new Date(data.scheduled_at).getTime() ===
+          new Date(originatingAction.action.scheduledAt).getTime() &&
+        new Date(originatingAction.action.approval.expiresAt).getTime() >
+          Date.now()
+      ),
     "SCHEDULE_IN_PAST",
     "Horário já passou",
   );
@@ -426,6 +512,7 @@ export async function schedule(
     idempotency_key: key,
     request_hash: requestHash,
     requested_by: actor.userId,
+    requested_aal: actor.aal,
   });
   const version = await resource(
     db,

@@ -3,6 +3,7 @@ import { config as loadEnv } from "dotenv";
 import { resolve } from "node:path";
 loadEnv({ path: resolve(process.cwd(), "../../.env"), quiet: true });
 const config: NextConfig = {
+  allowedDevOrigins: ["127.0.0.1"],
   output: "standalone",
   poweredByHeader: false,
   async headers() {

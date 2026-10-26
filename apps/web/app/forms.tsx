@@ -410,8 +410,8 @@ export function UploadPanel({ organization }: { organization: string }) {
         if (!file) return;
         setBusy(true);
         try {
-          if (file.size > 5 * 1024 * 1024)
-            throw new Error("Limite de 5 MB por arquivo");
+          if (file.size > (file.type === "video/mp4" ? 100 : 5) * 1024 * 1024)
+            throw new Error("Limite: MP4 até 100 MB; demais arquivos até 5 MB");
           const base64 = await new Promise<string>((resolve, reject) => {
             const reader = new FileReader();
             reader.onload = () => resolve(String(reader.result).split(",")[1]);
@@ -435,7 +435,8 @@ export function UploadPanel({ organization }: { organization: string }) {
     >
       <h2>Arquivo privado</h2>
       <p className="muted">
-        PDF, PNG, JPEG ou WebP · até 5 MB · verificação de antivírus
+        PDF, PNG, JPEG ou WebP até 5 MB; MP4 até 100 MB · verificação de
+        antivírus
       </p>
       {error && <div className="error">{error}</div>}
       <div className="form-grid">
@@ -459,7 +460,7 @@ export function UploadPanel({ organization }: { organization: string }) {
           <input
             required
             type="file"
-            accept="application/pdf,image/png,image/jpeg,image/webp"
+            accept="application/pdf,image/png,image/jpeg,image/webp,video/mp4"
             onChange={(e) => setFile(e.target.files?.[0])}
           />
         </label>

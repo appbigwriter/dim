@@ -9,11 +9,23 @@ import {
   ProviderFailure,
 } from "../../../packages/connectors/src/index";
 import { AppError } from "../../../packages/contracts/src/index";
+import {
+  loadVerifiedMedia,
+  type PrivateStorage,
+} from "../../../packages/connectors/src/storage";
+import type { MediaResolver } from "../../../packages/connectors/src/channels";
+import type { AudienceActions } from "../../../packages/connectors/src/audience-actions";
+import { demand } from "../../../packages/contracts/src/index";
+import { validateAudienceAction } from "../../../packages/contracts/src/audience-actions";
 export async function executePublication(
   db: Database,
   id: string,
-  connector: Connector,
+  connector:
+    | Connector
+    | ((secret: Record<string, string>, resolve?: MediaResolver) => Connector),
   vault: Vault,
+  storage?: PrivateStorage,
+  source?: AudienceActions,
 ) {
   const job = await one(
     db,
@@ -28,7 +40,7 @@ export async function executePublication(
       db,
       job.requested_by,
       job.organization_id,
-      "aal2",
+      job.requested_aal || "aal1",
       randomUUID(),
     );
   } catch {
@@ -73,12 +85,85 @@ export async function executePublication(
         actor,
         latest,
       );
+      const execution = await one(
+        tx,
+        "SELECT e.*,b.tenant_id,b.project_id,b.persona_id FROM custom_dim.audience_execution_requests e JOIN custom_dim.audience_bindings b ON b.id=e.binding_id WHERE e.content_id=$1",
+        [version.content_id],
+      );
+      const confirmSource = async () => {
+        if (execution) {
+          demand(
+            source,
+            "AUDIENCE_NOT_CONFIGURED",
+            "Publicação exige confirmar a aprovação vigente na origem",
+            503,
+          );
+          const binding = {
+            tenant_id: execution.tenant_id,
+            project_id: execution.project_id,
+            persona_id: execution.persona_id,
+          };
+          let approved;
+          try {
+            approved = validateAudienceAction(
+              await source.get(
+                job.organization_id,
+                binding,
+                execution.action_id,
+              ),
+              binding,
+            );
+          } catch (error) {
+            if (error instanceof AppError && error.status >= 500)
+              throw new ProviderFailure(
+                "retry",
+                "AUDIENCE_READBACK_UNAVAILABLE",
+                30,
+              );
+            throw error;
+          }
+          demand(
+            approved.actionHash === execution.action_hash,
+            "AUDIENCE_ACTION_CHANGED",
+            "A aprovação da origem mudou",
+            409,
+          );
+        }
+      };
       const secret = await vault.get(integration.secret_ref);
-      const response = await connector.publish({
+      const transport =
+        typeof connector === "function"
+          ? connector(
+              secret,
+              storage?.download
+                ? (assetId) => loadVerifiedMedia(tx, actor, assetId, storage)
+                : undefined,
+            )
+          : connector;
+      const beforeSend = async () => {
+        await confirmSource();
+        const currentActor = await loadActor(
+          tx,
+          job.requested_by,
+          job.organization_id,
+          job.requested_aal || "aal1",
+          randomUUID(),
+        );
+        await publicationGuard(tx, currentActor, latest);
+      };
+      await beforeSend();
+      const response = await transport.publish({
         token: secret.token,
         destination: account.external_id,
         text: version.body_text,
         idempotencyKey: job.idempotency_key,
+        payload: {
+          mediaAssetIds: version.body.asset_ids || [],
+          title: version.body.title,
+          subject: version.body.subject,
+          body: version.body,
+        },
+        beforeSend,
       });
       await insert(tx, "published_posts", {
         organization_id: job.organization_id,

@@ -448,10 +448,10 @@ O Audience Builder gere persona, trajetória de autoridade e gestão editorial d
 
 | Item | Aceite | Estado verificado |
 | --- | --- | --- |
-| ABDIM-001 — Contexto e vínculo por identidade | Pacote aprovado compatível com a origem, tenant/projeto, hashes, histórico, idempotência, persona somente leitura, invalidação de conteúdo e testes negativos | Implementado/testado localmente no DIM; contrato de export da origem ainda pendente |
-| ABDIM-002 — Export persistido no Audience | API oficial autenticada, readback real e contexto completo por tenant/projeto | Pendente de implementação na origem; a lista demonstrativa de projetos não satisfaz o aceite |
-| ABDIM-003 — Pedidos aprovados e execução DIM | Ação/canal/destino concretos, aprovação exata, contexto vigente, idempotência, guards e adaptador operacional para cada canal do escopo | Pendente do contrato/dispatcher transversal e dos adaptadores faltantes |
-| ABDIM-004 — Resultados de volta ao Audience | Receipt idempotente, IDs externos/evidências, custos, erros e métricas; `uncertain` sem reenvio cego | Pendente do contrato e receptor persistido na origem |
-| ABDIM-005 — Blog e homologação ponta a ponta | Audience gere editorial/blog; DIM executa ação aprovada via runtime oficial; testar mudança/revogação e retorno para todos os canais | Pendente de endpoints e homologação real |
+| ABDIM-001 — Contexto e vínculo por identidade | Pacote aprovado compatível com a origem, tenant/projeto, hashes, histórico, idempotência, persona somente leitura, invalidação de conteúdo e testes negativos | Local nos dois projetos; readback produtivo Authority exige configuração real |
+| ABDIM-002 — Export persistido no Audience | API oficial autenticada, readback real e contexto completo por tenant/projeto | Local JSON/Supabase append-only; smoke HTTP passou; domínio estratégico legado ainda não alimenta automaticamente o read model |
+| ABDIM-003 — Pedidos aprovados e execução DIM | Ação/canal/destino concretos, aprovação exata, contexto vigente, idempotência, guards e adaptador operacional para cada canal do escopo | Publicações implementadas com executor separado e revisão local; contratos específicos de conversa/CRM e formatos adicionais pendentes |
+| ABDIM-004 — Resultados de volta ao Audience | Receipt idempotente, IDs externos/evidências, custos, erros e métricas; `uncertain` sem reenvio cego | Recibos básicos/receptor/outbox/backoff locais; custos/métricas completos e homologação pendentes |
+| ABDIM-005 — Blog e homologação ponta a ponta | Audience gere editorial/blog; DIM executa ação aprovada via runtime oficial; testar mudança/revogação e retorno para todos os canais | Gateway WordPress na origem com intent/replay/revogação testados; provisionamento e homologação real pendentes |
 
 Especificação verificável: `docs/audience-integration.md`. Nenhum item pendente é considerado entregue pelo simples registro nesta tabela.

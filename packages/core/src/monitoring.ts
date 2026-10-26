@@ -1,4 +1,9 @@
 import { demand, AppError } from "../../contracts/src/index";
+import {
+  channelHealth,
+  channelCapabilityCode,
+} from "../../connectors/src/channels";
+import { ResendEmail } from "../../connectors/src/email";
 import { insert, one, type Database } from "../../db/src/index";
 import {
   TelegramConnector,
@@ -21,15 +26,20 @@ const probe: HealthProbe = async (provider, token, destination, secret) =>
     ? whatsappHealth(token, destination, secret.app_access_token)
     : provider === "telegram"
       ? new TelegramConnector().health(token, destination)
-      : new XConnector().health(token, destination);
+      : provider === "x"
+        ? new XConnector().health(token, destination)
+        : provider === "email" && secret.provider === "resend"
+          ? new ResendEmail(secret).health(destination)
+          : channelHealth(provider, secret, destination);
 export async function monitorAccounts(
   db: Database,
   vault: Vault,
   check: HealthProbe = probe,
+  mediaConfigured = false,
 ) {
   const accounts = (
     await db.query(
-      "SELECT a.*,p.code AS provider,i.id AS integration_id,i.secret_ref,i.granted_scopes,i.expires_at FROM custom_dim.social_accounts a JOIN custom_dim.platforms p ON p.id=a.platform_id JOIN custom_dim.account_integrations i ON i.social_account_id=a.id AND i.status='active' WHERE a.account_status='active' AND p.code IN('x','telegram','whatsapp') AND (i.last_tested_at IS NULL OR i.last_tested_at<now()-interval '5 minutes') ORDER BY i.last_tested_at NULLS FIRST LIMIT 50",
+      "SELECT a.*,p.code AS provider,i.id AS integration_id,i.secret_ref,i.granted_scopes,i.expires_at FROM custom_dim.social_accounts a JOIN custom_dim.platforms p ON p.id=a.platform_id JOIN custom_dim.account_integrations i ON i.social_account_id=a.id AND i.status='active' WHERE a.account_status='active' AND p.code IN('x','telegram','whatsapp','facebook','instagram','youtube','cms','email') AND (i.last_tested_at IS NULL OR i.last_tested_at<now()-interval '5 minutes') ORDER BY i.last_tested_at NULLS FIRST LIMIT 50",
     )
   ).rows;
   for (const account of accounts) {
@@ -53,7 +63,10 @@ export async function monitorAccounts(
         account.provider,
         secret.token,
         account.external_id,
-        secret,
+        {
+          ...secret,
+          media_transport_ready: mediaConfigured ? "true" : "false",
+        },
       );
       if (account.provider === "x")
         capabilities.publish =
@@ -85,7 +98,7 @@ export async function monitorAccounts(
         [failure ? "degraded" : "connected", account.id],
       );
       for (const [code, available] of Object.entries({
-        publish_text: !!capabilities?.publish,
+        [channelCapabilityCode(account.provider)]: !!capabilities?.publish,
         read_messages: !!capabilities?.readMessages,
         send_messages: !!capabilities?.sendMessages,
       }))

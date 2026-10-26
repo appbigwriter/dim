@@ -5,7 +5,7 @@ import { testDatabase } from "./helpers";
 import { migrate } from "../packages/db/src/migrate";
 import { seedOrganization } from "../packages/db/src/seed";
 import { insert } from "../packages/db/src/index";
-test("schema: 79 original domain tables plus 2 Audience integration tables, replay safe migrations, RLS, tenant FKs, append-only audit", async () => {
+test("schema: 79 original domain tables plus 4 Audience integration tables, replay safe migrations, RLS, tenant FKs, append-only audit", async () => {
   const db = await testDatabase();
   try {
     await migrate(db);
@@ -14,7 +14,7 @@ test("schema: 79 original domain tables plus 2 Audience integration tables, repl
         "SELECT count(*)::int AS n FROM pg_tables WHERE schemaname='custom_dim' AND tablename<>'schema_migrations'",
       )
     ).rows[0];
-    assert.equal(count.n, 81);
+    assert.equal(count.n, 83);
     const user = randomUUID();
     await db.query("INSERT INTO auth.users(id) VALUES($1)", [user]);
     const a = await seedOrganization(db, user, "A", "a");

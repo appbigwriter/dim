@@ -1,4 +1,13 @@
 import type { AudienceProvider } from "../../../packages/connectors/src/audience";
+import type { AudienceActions } from "../../../packages/connectors/src/audience-actions";
+import { audienceRoutes } from "./audience-routes";
+import { emailRoutes } from "./email-routes";
+import { ResendEmail } from "../../../packages/connectors/src/email";
+import {
+  channelConnector,
+  channelCapabilityCode,
+} from "../../../packages/connectors/src/channels";
+import { loadVerifiedMedia } from "../../../packages/connectors/src/storage";
 import Fastify, { type FastifyRequest } from "fastify";
 import cors from "@fastify/cors";
 import helmet from "@fastify/helmet";
@@ -32,6 +41,10 @@ import {
   type DB,
 } from "../../../packages/db/src/index";
 import { accessCommand } from "../../../packages/core/src/access";
+import {
+  createSimpleToken,
+  ensureAdminUserAndOrg,
+} from "../../../packages/core/src/simple-auth";
 import {
   resources,
   readResources,
@@ -93,6 +106,7 @@ type Options = {
   ) => Promise<{ userId: string; aal: string; emailVerified?: boolean }>;
   invite?: Inviter;
   audience?: AudienceProvider;
+  audienceActions?: AudienceActions;
   vault?: Vault;
   storage?: PrivateStorage;
   scan?: (data: Buffer) => Promise<void>;
@@ -274,7 +288,10 @@ export async function buildApp(opts: Options) {
     app.route({
       method,
       url: `/api/v1${path}`,
-      preHandler: auth,
+      ...(path === "/storage/upload" ? { bodyLimit: 141 * 1024 * 1024 } : {}),
+      ...(path === "/storage/upload"
+        ? { onRequest: auth }
+        : { preHandler: auth }),
       schema: {
         ...schema(path.split("/")[1], body, response),
         ...(paramNames.length
@@ -356,6 +373,52 @@ export async function buildApp(opts: Options) {
     ).rows;
     return { ...session, organizations };
   });
+  app.post("/api/v1/auth/simple-login", async (req) => {
+    const body = z
+      .object({
+        email: z.string().email(),
+        password: z.string().optional(),
+      })
+      .parse(req.body);
+
+    const configuredPassword = process.env.ADMIN_PASSWORD;
+    if (
+      configuredPassword &&
+      body.password &&
+      body.password !== configuredPassword
+    ) {
+      demand(false, "INVALID_CREDENTIALS", "Senha incorreta", 401);
+    }
+
+    let userId =
+      process.env.ADMIN_USER_ID ||
+      process.env.BOOTSTRAP_USER_ID ||
+      "b69b2949-f6be-4f86-9265-c0d561d5b0b0";
+    try {
+      const existingUser = await one(
+        opts.db,
+        "SELECT id FROM auth.users WHERE email = $1 LIMIT 1",
+        [body.email],
+      );
+      if (existingUser?.id) userId = existingUser.id;
+    } catch {}
+
+    const organizations = await ensureAdminUserAndOrg(
+      opts.db,
+      userId,
+      body.email,
+      process.env.BOOTSTRAP_ORG_NAME || "FBR Digital",
+      process.env.BOOTSTRAP_ORG_SLUG || "fbr-digital",
+    );
+
+    const token = await createSimpleToken(userId, body.email);
+
+    return {
+      token,
+      user: { id: userId, email: body.email },
+      organizations,
+    };
+  });
   app.post("/api/v1/automation/execute", async (req) => {
     demand(
       sameSecret(
@@ -400,12 +463,13 @@ export async function buildApp(opts: Options) {
     "POST",
     "/storage/upload",
     z.object({
-      base64: z.string().min(1).max(7000000),
+      base64: z.string().min(1).max(139810136),
       mime_type: z.enum([
         "image/png",
         "image/jpeg",
         "image/webp",
         "application/pdf",
+        "video/mp4",
       ]),
       influencer_id: uuid,
     }),
@@ -433,6 +497,18 @@ export async function buildApp(opts: Options) {
       "FILE_NOT_CLEAN",
       "Arquivo ainda não liberado",
     );
+    if ((r.query as any)?.preview === "true") {
+      demand(
+        await one(
+          db,
+          "SELECT a.id FROM custom_dim.identity_assets a JOIN custom_dim.media_licenses l ON l.id=a.license_id AND l.organization_id=a.organization_id WHERE a.organization_id=$1 AND a.influencer_id=$2 AND a.storage_object_id=$3 AND l.valid_until>now()",
+          [a.organizationId, file.influencer_id, file.id],
+        ),
+        "MEDIA_LICENSE_REQUIRED",
+        "Prévia exige licença atual e vínculo com a identidade",
+        409,
+      );
+    }
     return { url: await opts.storage.sign(file.object_path), expires_in: 60 };
   });
   route("POST", "/accounts/:id/oauth", z.object({}), async (db, a, r) => {
@@ -917,7 +993,7 @@ export async function buildApp(opts: Options) {
         409,
       );
       await db.query(
-        "UPDATE custom_dim.publication_jobs SET status='queued',scheduled_at=now() WHERE id=$1",
+        "UPDATE custom_dim.publication_jobs SET status='queued',scheduled_at=CASE WHEN EXISTS(SELECT 1 FROM custom_dim.audience_execution_requests e WHERE e.content_version_id=publication_jobs.content_version_id) THEN scheduled_at ELSE now() END WHERE id=$1",
         [job.id],
       );
       await insert(db, "outbox_events", {
@@ -1065,7 +1141,7 @@ export async function buildApp(opts: Options) {
       ).rows,
       templates: (
         await db.query(
-          "SELECT id,provider_template_id,language,category FROM custom_dim.message_templates WHERE organization_id=$1 AND approval_status='approved' AND content->>'social_account_id'=$2",
+          "SELECT id,provider_template_id,language,category,content->'components' AS components FROM custom_dim.message_templates WHERE organization_id=$1 AND approval_status='approved' AND content->>'social_account_id'=$2",
           [a.organizationId, c.social_account_id],
         )
       ).rows,
@@ -1327,7 +1403,15 @@ export async function buildApp(opts: Options) {
         [account.platform_id],
       );
       demand(
-        ["telegram", "whatsapp"].includes(provider?.code),
+        [
+          "telegram",
+          "whatsapp",
+          "facebook",
+          "instagram",
+          "youtube",
+          "cms",
+          "email",
+        ].includes(provider?.code),
         "OFFICIAL_SETUP_REQUIRED",
         "Use autorização oficial; este conector ainda não possui OAuth habilitado",
         422,
@@ -1354,10 +1438,21 @@ export async function buildApp(opts: Options) {
               account.external_id,
               secret.app_access_token,
             )
-          : await new TelegramConnector().health(
-              secret.token,
-              account.external_id,
-            );
+          : provider.code === "telegram"
+            ? await new TelegramConnector().health(
+                secret.token,
+                account.external_id,
+              )
+            : provider.code === "email" && secret.provider === "resend"
+              ? await new ResendEmail(secret).health(account.external_id)
+              : await channelConnector(
+                  provider.code,
+                  secret,
+                  opts.storage?.download
+                    ? (assetId) =>
+                        loadVerifiedMedia(db, a, assetId, opts.storage!)
+                    : undefined,
+                ).health(secret.token, account.external_id);
       const connector = await one(
         db,
         "SELECT id FROM custom_dim.connectors WHERE platform_id=$1 AND enabled=true ORDER BY version DESC LIMIT 1",
@@ -1373,7 +1468,11 @@ export async function buildApp(opts: Options) {
         social_account_id: account.id,
         connector_id: connector.id,
         auth_type:
-          provider.code === "whatsapp" ? "system_user_token" : "bot_token",
+          provider.code === "whatsapp"
+            ? "system_user_token"
+            : provider.code === "telegram"
+              ? "bot_token"
+              : "official_token",
         secret_ref: ref,
         granted_scopes:
           capabilities.scopes ||
@@ -1385,7 +1484,7 @@ export async function buildApp(opts: Options) {
         expires_at: capabilities.expiresAt,
       });
       for (const [capability, available] of Object.entries({
-        publish_text: capabilities.publish,
+        [channelCapabilityCode(provider.code)]: capabilities.publish,
         read_messages: capabilities.readMessages,
         send_messages: capabilities.sendMessages,
       }))
@@ -1599,6 +1698,8 @@ export async function buildApp(opts: Options) {
     }),
   );
   completionRoutes(app, route, opts, auth);
+  audienceRoutes(app, route, opts, auth);
+  emailRoutes(route);
   await app.ready();
   return app;
 }
