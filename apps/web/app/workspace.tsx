@@ -158,21 +158,23 @@ function Login({ onSession }: { onSession: () => void }) {
           completeLogin();
           return;
         }
-      } else if (res && res.status === 401) {
+      } else if (res) {
         const errJson = await res.json().catch(() => null);
-        throw new Error(errJson?.message || "Credenciais inválidas");
-      } else if (res && res.status === 503) {
-        throw new Error(
-          "A API interna ainda está inicializando na VPS. Aguarde alguns instantes e tente novamente.",
-        );
-      } else if (res && res.status === 404 && isQuickLogin) {
-        throw new Error(
-          "O serviço de autenticação simples não está ativo no container. Faça o redeploy da imagem mais recente na VPS.",
-        );
-      }
-
-      if (isQuickLogin) {
-        throw new Error("Não foi possível autenticar via Acesso Rápido.");
+        if (res.status === 503) {
+          throw new Error(
+            "A API interna ainda está inicializando na VPS. Aguarde alguns instantes e tente novamente.",
+          );
+        }
+        if (res.status === 404 && isQuickLogin) {
+          throw new Error(
+            "O serviço de autenticação simples não está ativo no container. Faça o redeploy da imagem mais recente na VPS.",
+          );
+        }
+        if (isQuickLogin || res.status === 401) {
+          throw new Error(
+            errJson?.message || `Falha na autenticação rápida (${res.status})`,
+          );
+        }
       }
 
       const client = authClient();
