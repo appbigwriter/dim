@@ -20,10 +20,16 @@ import {
   supabaseStorage,
   clamScan,
 } from "../../../packages/connectors/src/storage";
-for (const key of ["DATABASE_URL", "SUPABASE_URL", "SUPABASE_ANON_KEY"])
-  if (!process.env[key]) throw new Error(`Configure ${key}`);
-const db = postgres(process.env.DATABASE_URL!);
-if (process.env.AUTO_MIGRATE === "true") {
+const dbUrl = process.env.DATABASE_URL || "postgresql://postgres:postgres@127.0.0.1:5432/postgres";
+const supabaseUrl = process.env.SUPABASE_URL || "https://supabase-control-tower-api.fbr.news";
+const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.dummy";
+
+if (!process.env.DATABASE_URL) {
+  console.warn("[API] AVISO: DATABASE_URL não configurada no ambiente.");
+}
+
+const db = postgres(dbUrl);
+if (process.env.AUTO_MIGRATE === "true" && process.env.DATABASE_URL) {
   try {
     console.log("[API] Executando migrações automáticas de banco de dados...");
     await migrate(db);
@@ -33,8 +39,8 @@ if (process.env.AUTO_MIGRATE === "true") {
   }
 }
 const client = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_ANON_KEY!,
+  supabaseUrl,
+  supabaseAnonKey,
   { auth: { persistSession: false, autoRefreshToken: false } },
 );
 const redis = process.env.REDIS_URL
