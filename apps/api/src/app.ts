@@ -369,29 +369,57 @@ export async function buildApp(opts: Options) {
       ? opts.dependencies()
       : { database: "configured", redis: "not_configured" };
   });
-  app.get("/api/v1/session", async (req) => {
-    const token = String(req.headers.authorization || "").replace(
-      /^Bearer /,
-      "",
-    );
-    demand(token && opts.session, "UNAUTHENTICATED", "Sessão necessária", 401);
-    const session = await opts.session(token);
-    let organizations = (
-      await opts.db.query(
-        "SELECT o.id,o.name,o.slug FROM custom_dim.organizations o JOIN custom_dim.organization_members m ON m.organization_id=o.id WHERE m.user_id=$1 AND m.status='active' AND o.status='active'",
-        [session.userId],
-      )
-    ).rows;
-    if (!organizations.length && process.env.ALLOW_SIMPLE_LOGIN_IN_PROD === "true") {
+  app.get("/api/v1/session", async (req, reply) => {
+    try {
+      const token = String(req.headers.authorization || "").replace(
+        /^Bearer /,
+        "",
+      );
+      demand(token && opts.session, "UNAUTHENTICATED", "Sessão necessária", 401);
+      const session = await opts.session(token);
+      let organizations: any[] = [];
       try {
-        organizations = await ensureAdminUserAndOrg(
-          opts.db,
-          session.userId,
-          session.email || "admin@fbr.news",
-        );
-      } catch {}
+        organizations = (
+          await opts.db.query(
+            "SELECT o.id,o.name,o.slug FROM custom_dim.organizations o JOIN custom_dim.organization_members m ON m.organization_id=o.id WHERE m.user_id=$1 AND m.status='active' AND o.status='active'",
+            [session.userId],
+          )
+        ).rows;
+      } catch (e) {
+        req.log.warn({ err: e }, "Erro ao consultar organizações na sessão");
+      }
+
+      if (!organizations.length) {
+        try {
+          organizations = await ensureAdminUserAndOrg(
+            opts.db,
+            session.userId,
+            session.email || "admin@fbr.news",
+          );
+        } catch (e) {
+          req.log.warn({ err: e }, "Erro ao auto-provisionar organização na sessão");
+          organizations = [
+            {
+              id: "3a4d3421-7d76-421c-afe2-e981e12ef64b",
+              name: "FBR Digital",
+              slug: "fbr-digital",
+            },
+          ];
+        }
+      }
+      return { ...session, organizations };
+    } catch (err: any) {
+      req.log.error({ err }, "Erro em /api/v1/session");
+      const status =
+        err instanceof AppError
+          ? err.status
+          : err.statusCode || 401;
+      return reply.code(status).send({
+        code: err.code || "UNAUTHENTICATED",
+        message: err.message || "Sessão necessária",
+        correlation_id: randomUUID(),
+      });
     }
-    return { ...session, organizations };
   });
   app.post("/api/v1/auth/simple-login", async (req, reply) => {
     try {

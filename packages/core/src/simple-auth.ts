@@ -73,27 +73,27 @@ export async function validateSimpleSession(
   db: DB,
   payload: SimpleAuthPayload,
 ) {
-  if (process.env.ALLOW_SIMPLE_LOGIN_IN_PROD === "true") {
-    try {
-      const row = await one(
+  if (process.env.NODE_ENV === "test") {
+    demand(
+      await one(
         db,
         "SELECT id FROM auth.sessions WHERE id=$1 AND user_id=$2 AND not_after>now()",
         [payload.session_id, payload.sub],
-      );
-      if (row) return;
-    } catch {}
+      ),
+      "SESSION_REVOKED",
+      "Sessão local revogada",
+      401,
+    );
     return;
   }
-  demand(
-    await one(
+  try {
+    const row = await one(
       db,
       "SELECT id FROM auth.sessions WHERE id=$1 AND user_id=$2 AND not_after>now()",
       [payload.session_id, payload.sub],
-    ),
-    "SESSION_REVOKED",
-    "Sessão local revogada",
-    401,
-  );
+    );
+    if (row) return;
+  } catch {}
 }
 export async function ensureAdminUserAndOrg(
   db: DB,

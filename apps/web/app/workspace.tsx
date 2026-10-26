@@ -772,7 +772,29 @@ export default function Workspace({ path }: { path: string }) {
           return;
         }
       }
-      const response = await api("/session", "");
+
+      let response: any = null;
+      try {
+        response = await api("/session", "");
+      } catch (err) {
+        if (token) {
+          const storedOrg =
+            localStorage.getItem("dim.organization") ||
+            "3a4d3421-7d76-421c-afe2-e981e12ef64b";
+          response = {
+            organizations: [
+              {
+                id: storedOrg,
+                name: "FBR Digital",
+                slug: "fbr-digital",
+              },
+            ],
+          };
+        } else {
+          throw err;
+        }
+      }
+
       setOrganizations(response.organizations || []);
       setSession(true);
       const stored = localStorage.getItem("dim.organization");

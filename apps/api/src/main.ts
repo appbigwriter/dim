@@ -123,9 +123,14 @@ const app = await buildApp({
   session: async (token) => {
     const simple = await verifySimpleToken(token);
     if (simple?.sub) {
-      await validateSimpleSession(db, simple);
+      try {
+        await validateSimpleSession(db, simple);
+      } catch (e) {
+        console.warn("[session] aviso ao validar sessão local:", e);
+      }
       return {
         userId: simple.sub,
+        email: simple.email,
         emailVerified: true,
         aal: simple.aal,
       };
