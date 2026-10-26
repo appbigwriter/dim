@@ -227,7 +227,7 @@ export async function buildApp(opts: Options) {
                 : 500;
     if (status === 500)
       app.log.error(
-        { correlation_id: req.id, code: err.code || "INTERNAL_ERROR" },
+        { correlation_id: req.id, code: err.code || "INTERNAL_ERROR", message: err.message, stack: err.stack },
         "request_failed",
       );
     reply.code(status).send({
